@@ -2,25 +2,14 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-
-const CATEGORIES = [
-  "GROCERIES",
-  "DINING",
-  "TRANSPORT",
-  "UTILITIES",
-  "HEALTH",
-  "SHOPPING",
-  "ENTERTAINMENT",
-  "TRAVEL",
-  "EDUCATION",
-  "OTHER",
-] as const;
+import { CATEGORIES, type CategoryName } from "@/lib/categories";
+import { toMinorUnits } from "@/lib/money";
 
 export type ReceiptFormValues = {
   merchant: string;
   amount: string;
   currency: string;
-  category: (typeof CATEGORIES)[number];
+  category: CategoryName;
   purchasedAt: string;
   source: string;
   imageUrl?: string;
@@ -75,7 +64,7 @@ export default function ReceiptForm({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         merchant: values.merchant,
-        amount,
+        totalMinor: toMinorUnits(amount),
         currency: values.currency,
         category: values.category,
         purchasedAt: new Date(values.purchasedAt).toISOString(),

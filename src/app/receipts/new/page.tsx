@@ -1,30 +1,45 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useRouter } from "next/navigation";
 import QRScanner from "@/components/QRScanner";
 import ReceiptForm, { ReceiptFormValues } from "@/components/ReceiptForm";
-import { parseQrPayload } from "@/lib/parseReceipt";
+import { extractClaimToken, parseInlinePayload } from "@/lib/parseReceipt";
 
 type Mode = "choose" | "qr" | "photo" | "manual";
 
 export default function NewReceiptPage() {
+  const router = useRouter();
   const [mode, setMode] = useState<Mode>("choose");
   const [initialValues, setInitialValues] =
     useState<Partial<ReceiptFormValues>>();
 
-  const handleDecode = useCallback((payload: string) => {
-    const parsed = parseQrPayload(payload);
-    setInitialValues({
-      merchant: parsed.merchant,
-      amount: String(parsed.amount),
-      currency: parsed.currency,
-      category: parsed.category,
-      purchasedAt: parsed.purchasedAt.slice(0, 10),
-      source: "QR",
-      rawPayload: payload,
-    });
-    setMode("manual");
-  }, []);
+  const handleDecode = useCallback(
+    (payload: string) => {
+      const claimToken = extractClaimToken(payload);
+      if (claimToken) {
+        // Merchant-issued claim link: the receipt already exists
+        // server-side, authoritatively — just resolve and claim it.
+        router.push(`/claim/${claimToken}`);
+        return;
+      }
+
+      // Legacy inline payload (no merchant API integration yet): the QR
+      // encodes the receipt data directly, so prefill the form for review.
+      const parsed = parseInlinePayload(payload);
+      setInitialValues({
+        merchant: parsed.merchant,
+        amount: String(parsed.amount),
+        currency: parsed.currency,
+        category: parsed.category,
+        purchasedAt: parsed.purchasedAt.slice(0, 10),
+        source: "QR",
+        rawPayload: payload,
+      });
+      setMode("manual");
+    },
+    [router]
+  );
 
   function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { Category, ReceiptSource } from "@/generated/prisma/client";
+import { createReceiptSchema } from "@/lib/validation";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -18,34 +18,54 @@ export async function GET(request: NextRequest) {
 
   const receipts = await prisma.receipt.findMany({
     where,
+    include: { merchant: true, items: true },
     orderBy: { purchasedAt: "desc" },
   });
   return NextResponse.json(receipts);
 }
 
 export async function POST(request: NextRequest) {
-  const body = await request.json();
-  const { merchant, amount, currency, category, purchasedAt, source, imageUrl, rawPayload, notes } = body;
+  const body = await request.json().catch(() => null);
+  if (body === null) {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
-  if (!merchant || typeof amount !== "number" || !purchasedAt) {
+  const parsed = createReceiptSchema.safeParse(body);
+  if (!parsed.success) {
     return NextResponse.json(
-      { error: "merchant, amount, and purchasedAt are required" },
+      { error: "Invalid receipt payload", issues: parsed.error.issues },
       { status: 400 }
     );
   }
+  const data = parsed.data;
+
+  const merchant = await prisma.merchant.upsert({
+    where: { name: data.merchant },
+    update: {},
+    create: { name: data.merchant },
+  });
 
   const receipt = await prisma.receipt.create({
     data: {
-      merchant,
-      amount,
-      currency: currency ?? "USD",
-      category: (category as Category) ?? Category.OTHER,
-      purchasedAt: new Date(purchasedAt),
-      source: (source as ReceiptSource) ?? ReceiptSource.MANUAL,
-      imageUrl,
-      rawPayload,
-      notes,
+      merchantId: merchant.id,
+      currency: data.currency,
+      totalMinor: data.totalMinor,
+      subtotalMinor: data.subtotalMinor,
+      taxMinor: data.taxMinor,
+      discountMinor: data.discountMinor,
+      feeMinor: data.feeMinor,
+      category: data.category,
+      purchasedAt: new Date(data.purchasedAt),
+      source: data.source,
+      verification: "UNVERIFIED",
+      imageUrl: data.imageUrl,
+      rawPayload: data.rawPayload,
+      notes: data.notes,
+      items: data.items
+        ? { create: data.items }
+        : undefined,
     },
+    include: { merchant: true, items: true },
   });
 
   return NextResponse.json(receipt, { status: 201 });

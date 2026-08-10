@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { fromMinorUnits } from "@/lib/money";
 
 export async function GET() {
   const receipts = await prisma.receipt.findMany();
@@ -8,7 +9,7 @@ export async function GET() {
   for (const r of receipts) {
     const y = r.purchasedAt.getFullYear();
     byYear[y] ??= { total: 0, count: 0 };
-    byYear[y].total += r.amount;
+    byYear[y].total += fromMinorUnits(r.totalMinor);
     byYear[y].count += 1;
   }
 

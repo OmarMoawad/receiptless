@@ -14,7 +14,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "receiptless",
-  description: "Paperless receipts with monthly and annual spend tracking.",
+  description:
+    "The interoperable digital receipt layer: every purchase captured, normalized, and searchable forever.",
   manifest: "/manifest.json",
 };
 

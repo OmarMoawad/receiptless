@@ -1,16 +1,25 @@
 # receiptless
 
-Paperless receipts, tracked automatically. Capture receipts by scanning a QR
-code or uploading a photo, and see monthly/annual spend broken down by
-category — installable as a PWA on any phone or desktop.
+**Every receipt. Automatically. Forever.**
 
-See [ROADMAP.md](./ROADMAP.md) for the full 1-year plan (native apps,
-NFC/Bluetooth capture, POS/retailer integrations, marketplace launch).
+An interoperable digital receipt identity and delivery layer. A purchase
+generates a structured digital receipt that reaches your private receipt
+vault through whichever channel is available — QR claim link, photo, email,
+POS API, or eventually NFC/BLE — gets normalized into one canonical format,
+and stays permanently searchable: warranty windows, return windows, tax
+categorization, and spend intelligence, all generated automatically instead
+of hand-entered.
+
+See [ROADMAP.md](./ROADMAP.md) for the full plan — canonical receipt schema,
+the QR claim-token protocol, merchant API/SDK, receipt authenticity/
+signatures, merchant terminal + payment-authorization integration, native
+apps with platform NFC, and financial intelligence.
 
 ## Stack
 
 - [Next.js](https://nextjs.org) (App Router) + TypeScript + Tailwind
 - [Prisma](https://www.prisma.io) + SQLite (dev) via the `better-sqlite3` driver adapter
+- [Zod](https://zod.dev) for API input validation
 - [jsQR](https://github.com/cozmo/jsQR) for in-browser QR decoding
 - [Recharts](https://recharts.org) for the spend dashboards
 - PWA manifest + service worker for install-to-home-screen on any device
@@ -21,25 +30,60 @@ NFC/Bluetooth capture, POS/retailer integrations, marketplace launch).
 npm install
 cp .env.example .env
 npx prisma generate
-npx prisma migrate dev
+npx prisma migrate deploy
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
 
+## Data model
+
+`Merchant` → `Receipt` → `ReceiptItem`, with money always stored as integer
+minor units (cents) rather than floats, and a `verification` ladder
+(`UNVERIFIED` → `IMPORTED` → `MERCHANT_VERIFIED`, with cryptographic
+signatures planned) so the system can eventually distinguish a photographed
+receipt from an authoritative one issued by the merchant.
+
+## The QR claim-token protocol
+
+Instead of encoding receipt data directly in a QR image, a merchant/terminal
+calls `POST /api/merchant/receipts` to create the receipt server-side and
+gets back an opaque, expiring **claim token**. The QR (or link) encodes only
+that token. Scanning it hits `GET /api/claim/:token` or the `/claim/:token`
+web page, which resolves the real receipt and marks it claimed.
+
+Why this instead of embedding data in the QR: no sensitive receipt data sits
+in a scannable image indefinitely, tokens expire and are revocable, receipts
+can be signed, and any POS that can display a QR can participate — no
+Bluetooth stack or iOS NFC workaround required. See `ROADMAP.md` for why
+this is sequenced ahead of NFC/BLE.
+
+Legacy inline QR payloads (raw JSON or `merchant|amount|currency|date`) are
+still parsed as a fallback for retailers who print a QR without integrating
+the merchant API — see `src/lib/parseReceipt.ts`.
+
 ## Project structure
 
 - `src/app/page.tsx` — dashboard (monthly/annual charts)
-- `src/app/receipts` — receipt list + capture flow (QR / photo / manual)
-- `src/app/api/receipts` — create/list receipts
-- `src/app/api/reports` — monthly/annual aggregation endpoints
-- `src/lib/parseReceipt.ts` — QR payload parser (seed for per-retailer adapters, see roadmap Phase 4)
-- `prisma/schema.prisma` — `Receipt` model
+- `src/app/receipts` — vault list (with search) + capture flow (QR / photo / manual)
+- `src/app/claim/[token]` — public claim-link resolution page
+- `src/app/api/receipts` — consumer create/list
+- `src/app/api/merchant/receipts` — merchant/terminal push (claim-token issuance)
+- `src/app/api/claim/[token]` — claim-token resolution API
+- `src/app/api/search` — vault search
+- `src/app/api/reports` — monthly/annual aggregation
+- `src/lib/validation.ts` — Zod schemas for every write path
+- `src/lib/money.ts` — minor-unit money helpers
+- `prisma/schema.prisma` — `Merchant` / `Receipt` / `ReceiptItem` models
 
 ## Notes
 
 - Receipt photos are currently stored inline as data URLs for MVP simplicity;
   Phase 1 of the roadmap moves this to object storage (S3/R2).
-- There's no auth yet — this is a single-user local MVP. Auth lands in Phase 1.
-- NFC/Bluetooth capture isn't implemented yet — see the roadmap for why that's
-  sequenced later (platform + retailer-partnership dependent, not just code).
+- There's no multi-user auth yet — every receipt lives in one shared vault.
+  Auth lands in Phase 1.
+- `/api/merchant/receipts` is unauthenticated and meant for local/demo use —
+  Phase 3 adds real merchant API keys before this is exposed publicly.
+- NFC/Bluetooth capture isn't implemented yet — see the roadmap for why
+  that's sequenced after the claim-token protocol and merchant API rather
+  than first (platform + retailer-partnership dependent, not just code).

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { fromMinorUnits } from "@/lib/money";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -22,13 +23,14 @@ export async function GET(request: NextRequest) {
 
   for (const r of receipts) {
     const m = r.purchasedAt.getMonth();
-    months[m].total += r.amount;
+    months[m].total += fromMinorUnits(r.totalMinor);
     months[m].count += 1;
   }
 
   const byCategory: Record<string, number> = {};
   for (const r of receipts) {
-    byCategory[r.category] = (byCategory[r.category] ?? 0) + r.amount;
+    byCategory[r.category] =
+      (byCategory[r.category] ?? 0) + fromMinorUnits(r.totalMinor);
   }
 
   return NextResponse.json({ year, months, byCategory });

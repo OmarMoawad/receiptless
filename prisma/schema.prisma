@@ -17,6 +17,7 @@ enum ReceiptSource {
   NFC
   BLUETOOTH
   EMAIL
+  POS_API
 }
 
 enum Category {
@@ -32,20 +33,90 @@ enum Category {
   OTHER
 }
 
+// UNVERIFIED: manual entry or a photo with no merchant confirmation.
+// IMPORTED: parsed from an external source (email forward) we didn't validate against the merchant.
+// MERCHANT_VERIFIED: pushed directly by the merchant/terminal via the receipt API — authoritative.
+// Signature-based cryptographic verification is a later phase; this field is the seed of that ladder.
+enum VerificationLevel {
+  UNVERIFIED
+  IMPORTED
+  MERCHANT_VERIFIED
+}
+
+model Merchant {
+  id        String    @id @default(cuid())
+  // Unique by display name for now — a simplification. Real-world merchants
+  // with multiple locations/franchises will need a MerchantLocation model
+  // once POS integrations (ROADMAP.md) make location data available.
+  name      String    @unique
+  website   String?
+  createdAt DateTime  @default(now())
+  receipts  Receipt[]
+}
+
 model Receipt {
-  id         String        @id @default(cuid())
-  merchant   String
-  amount     Float
-  currency   String        @default("USD")
-  category   Category      @default(OTHER)
+  id       String   @id @default(cuid())
+  merchant Merchant @relation(fields: [merchantId], references: [id])
+  merchantId String
+
+  currency String @default("USD")
+
+  // All money fields are integer minor units (cents) — never float — so
+  // totals, sums, and reports don't accumulate rounding error.
+  subtotalMinor Int?
+  taxMinor      Int?
+  discountMinor Int?
+  feeMinor      Int?
+  totalMinor    Int
+
+  category    Category @default(OTHER)
   purchasedAt DateTime
-  source     ReceiptSource @default(MANUAL)
+
+  source       ReceiptSource     @default(MANUAL)
+  verification VerificationLevel @default(UNVERIFIED)
+
+  // Claim-token protocol: a merchant/terminal can create a receipt server-side
+  // and hand the customer only an opaque, expiring token (via QR, link, etc.)
+  // instead of embedding receipt data directly in the transfer medium.
+  claimToken          String?   @unique
+  claimTokenExpiresAt DateTime?
+  claimedAt           DateTime?
+
   imageUrl   String?
   rawPayload String?
   notes      String?
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
+
+  items ReceiptItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([purchasedAt])
   @@index([category])
+  @@index([merchantId])
+}
+
+model ReceiptItem {
+  id        String  @id @default(cuid())
+  receipt   Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  receiptId String
+
+  name     String
+  sku      String?
+  category Category @default(OTHER)
+
+  quantity        Float @default(1)
+  unitPriceMinor  Int
+  totalPriceMinor Int
+  taxMinor        Int?
+  discountMinor   Int?
+
+  // Lightweight seed for the warranty/return layer — a full claims workflow
+  // is a later phase, but capturing these at ingestion time means the data
+  // exists once that phase is built instead of needing backfill.
+  warrantyMonths   Int?
+  returnWindowDays Int?
+
+  @@index([receiptId])
+  @@index([name])
 }

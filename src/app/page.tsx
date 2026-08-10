@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
+import { fromMinorUnits } from "@/lib/money";
 import {
   AnnualBarChart,
   CategoryPieChart,
@@ -22,8 +23,9 @@ async function getMonthlyData(year: number) {
   const byCategory: Record<string, number> = {};
 
   for (const r of receipts) {
-    months[r.purchasedAt.getMonth()].total += r.amount;
-    byCategory[r.category] = (byCategory[r.category] ?? 0) + r.amount;
+    const amount = fromMinorUnits(r.totalMinor);
+    months[r.purchasedAt.getMonth()].total += amount;
+    byCategory[r.category] = (byCategory[r.category] ?? 0) + amount;
   }
 
   return { months, byCategory, count: receipts.length };
@@ -34,7 +36,7 @@ async function getAnnualData() {
   const byYear: Record<number, number> = {};
   for (const r of receipts) {
     const y = r.purchasedAt.getFullYear();
-    byYear[y] = (byYear[y] ?? 0) + r.amount;
+    byYear[y] = (byYear[y] ?? 0) + fromMinorUnits(r.totalMinor);
   }
   return Object.entries(byYear)
     .map(([year, total]) => ({ year: Number(year), total }))
@@ -56,7 +58,7 @@ export default async function Home() {
         <div>
           <h1 className="text-2xl font-semibold">receiptless</h1>
           <p className="text-sm text-neutral-500">
-            Paperless receipts, tracked automatically.
+            Every receipt. Automatically. Forever.
           </p>
         </div>
         <Link
