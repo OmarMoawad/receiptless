@@ -33,6 +33,34 @@ Paper reduction is a real and pleasant side effect, not the primary pitch —
 the sharper hook is "I never lose proof of purchase again," because that's
 what actually drives someone to change behavior at checkout.
 
+## Relationship to IDent (documented intent, not built)
+
+receiptless is being developed as a standalone product, and stays that
+way for now — no code or repo merge planned. Separately, Omar is building
+[IDent](https://github.com/OmarMoawad/IDent) (`/Users/Omar/IDent`), a
+broader personal-identity platform. The decision (2026-08-10, captured in
+IDent's own ROADMAP.md/ARCHITECTURE.md/IDent_STATE.md): if the two
+integrate later, IDent becomes receiptless's **identity authority**, not
+its owner:
+
+- receiptless would store an `ownerSubjectId` referencing IDent's
+  `identity_id` once receiptless has real multi-user accounts (Phase 1,
+  above) and IDent has a consent/scoped-alias system (neither exists
+  yet) — not a duplicated user/auth table of its own.
+- **Repos stay separate**, integrated through explicit API contracts
+  (identity resolution, consent checks), not a monorepo merge.
+- Merchant-facing checkout would eventually use a scoped, pseudonymous
+  identifier per merchant relationship rather than one identifier handed
+  to every merchant — this is a real, not-yet-designed IDent-side gap
+  (see IDent_STATE.md's future architecture gaps log), and receiptless is
+  the first concrete driver for it.
+- Branding likely stays "receiptless" (possibly "Receiptless — by IDent"
+  later) rather than being absorbed into the IDent name.
+
+Nothing here changes this roadmap's own phases below — they're written to
+stand on their own regardless of whether the IDent integration ever
+happens.
+
 ## The five layers
 
 1. **Capture** — QR, camera/OCR, email, POS API, NFC/BLE, manual entry.
