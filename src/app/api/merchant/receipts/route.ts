@@ -50,7 +50,13 @@ export async function POST(request: NextRequest) {
       category: data.category,
       purchasedAt: new Date(data.purchasedAt),
       source: data.source,
-      verification: "MERCHANT_VERIFIED",
+      // This endpoint has no merchant authentication yet, so it cannot
+      // honestly claim MERCHANT_VERIFIED — that label must mean "an
+      // authenticated, authorized merchant key created this," which only
+      // exists once Phase 3 (merchant API keys) lands. Until then, treat
+      // this as a local simulator and mark output UNVERIFIED so the
+      // verification field never overstates its guarantee.
+      verification: "UNVERIFIED",
       rawPayload: data.rawPayload,
       claimToken,
       claimTokenExpiresAt,

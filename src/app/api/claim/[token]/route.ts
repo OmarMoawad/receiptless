@@ -1,38 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { resolveClaim } from "@/lib/claim";
 
 /**
  * Resolves a claim token from the QR claim-token protocol (see
  * merchant/receipts route and ROADMAP.md). The token is opaque and carries
  * no receipt data itself — this is the only place that data is fetched,
- * so it can be gated, expired, and (later) tied to a specific customer
- * identity instead of being embedded in a scannable image forever.
+ * so it can be gated, expired, and rejected on replay instead of being
+ * embedded in a scannable image forever. See src/lib/claim.ts for the
+ * one-time-claim semantics.
  */
 export async function GET(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
   const { token } = await params;
+  const result = await resolveClaim(token);
 
-  const receipt = await prisma.receipt.findUnique({
-    where: { claimToken: token },
-    include: { merchant: true, items: true },
-  });
-
-  if (!receipt) {
-    return NextResponse.json({ error: "Claim token not found" }, { status: 404 });
+  switch (result.status) {
+    case "not_found":
+      return NextResponse.json({ error: "Claim token not found" }, { status: 404 });
+    case "expired":
+      return NextResponse.json({ error: "Claim token expired" }, { status: 410 });
+    case "already_claimed":
+      return NextResponse.json(
+        { error: "Claim token already used" },
+        { status: 409 }
+      );
+    case "claimed":
+      return NextResponse.json(result.receipt);
   }
-
-  if (receipt.claimTokenExpiresAt && receipt.claimTokenExpiresAt < new Date()) {
-    return NextResponse.json({ error: "Claim token expired" }, { status: 410 });
-  }
-
-  if (!receipt.claimedAt) {
-    await prisma.receipt.update({
-      where: { id: receipt.id },
-      data: { claimedAt: new Date() },
-    });
-  }
-
-  return NextResponse.json(receipt);
 }

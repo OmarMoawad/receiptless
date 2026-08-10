@@ -1,8 +1,17 @@
 import Link from "next/link";
-import { prisma } from "@/lib/db";
+import { resolveClaim } from "@/lib/claim";
 import { formatMinorUnits } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
+
+function InfoPage({ title, body }: { title: string; body: string }) {
+  return (
+    <main className="flex flex-col items-center gap-2 p-6 text-center">
+      <h1 className="text-xl font-semibold">{title}</h1>
+      <p className="text-neutral-500 text-sm">{body}</p>
+    </main>
+  );
+}
 
 export default async function ClaimPage({
   params,
@@ -10,40 +19,43 @@ export default async function ClaimPage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
+  const result = await resolveClaim(token);
 
-  const receipt = await prisma.receipt.findUnique({
-    where: { claimToken: token },
-    include: { merchant: true, items: true },
-  });
-
-  if (!receipt) {
+  if (result.status === "not_found") {
     return (
-      <main className="flex flex-col items-center gap-2 p-6 text-center">
-        <h1 className="text-xl font-semibold">Claim link not found</h1>
-        <p className="text-neutral-500 text-sm">
-          This receipt link is invalid or was already removed.
+      <InfoPage
+        title="Claim link not found"
+        body="This receipt link is invalid or was already removed."
+      />
+    );
+  }
+
+  if (result.status === "expired") {
+    return (
+      <InfoPage
+        title="Claim link expired"
+        body="Ask the merchant to resend your receipt."
+      />
+    );
+  }
+
+  if (result.status === "already_claimed") {
+    return (
+      <main className="flex flex-col items-center gap-3 p-6 text-center">
+        <h1 className="text-xl font-semibold">Already claimed</h1>
+        <p className="text-neutral-500 text-sm max-w-xs">
+          This claim link has already been used and can&apos;t be reused —
+          that&apos;s intentional, so a token can&apos;t be replayed by
+          anyone who saw the QR before you scanned it.
         </p>
+        <Link href="/receipts" className="text-sm text-emerald-600 underline">
+          View your vault →
+        </Link>
       </main>
     );
   }
 
-  if (receipt.claimTokenExpiresAt && receipt.claimTokenExpiresAt < new Date()) {
-    return (
-      <main className="flex flex-col items-center gap-2 p-6 text-center">
-        <h1 className="text-xl font-semibold">Claim link expired</h1>
-        <p className="text-neutral-500 text-sm">
-          Ask the merchant to resend your receipt.
-        </p>
-      </main>
-    );
-  }
-
-  if (!receipt.claimedAt) {
-    await prisma.receipt.update({
-      where: { id: receipt.id },
-      data: { claimedAt: new Date() },
-    });
-  }
+  const receipt = result.receipt;
 
   return (
     <main className="flex flex-col items-center gap-4 p-6 max-w-sm mx-auto text-center">
@@ -54,7 +66,7 @@ export default async function ClaimPage({
       <div className="border rounded p-4 w-full text-left">
         <p className="font-medium">{receipt.merchant.name}</p>
         <p className="text-sm text-neutral-500">
-          {receipt.purchasedAt.toISOString().slice(0, 10)} · Merchant verified
+          {receipt.purchasedAt.toISOString().slice(0, 10)}
         </p>
         <p className="font-mono text-lg mt-2">
           {formatMinorUnits(receipt.totalMinor, receipt.currency)}

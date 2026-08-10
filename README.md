@@ -48,13 +48,17 @@ receipt from an authoritative one issued by the merchant.
 
 Instead of encoding receipt data directly in a QR image, a merchant/terminal
 calls `POST /api/merchant/receipts` to create the receipt server-side and
-gets back an opaque, expiring **claim token**. The QR (or link) encodes only
-that token. Scanning it hits `GET /api/claim/:token` or the `/claim/:token`
-web page, which resolves the real receipt and marks it claimed.
+gets back an opaque, expiring, **single-use claim token**. The QR (or link)
+encodes only that token. Scanning it hits `GET /api/claim/:token` or the
+`/claim/:token` web page, which resolves the real receipt and marks it
+claimed — atomically, so it can't be claimed twice, and any later request
+with the same token (even before it expires) is rejected with `409` rather
+than silently re-serving the receipt. See `src/lib/claim.ts`.
 
 Why this instead of embedding data in the QR: no sensitive receipt data sits
-in a scannable image indefinitely, tokens expire and are revocable, receipts
-can be signed, and any POS that can display a QR can participate — no
+in a scannable image indefinitely, tokens expire, are single-use, and are
+revocable, receipts can be signed, and any POS that can display a QR can
+participate — no
 Bluetooth stack or iOS NFC workaround required. See `ROADMAP.md` for why
 this is sequenced ahead of NFC/BLE.
 
@@ -83,7 +87,10 @@ the merchant API — see `src/lib/parseReceipt.ts`.
 - There's no multi-user auth yet — every receipt lives in one shared vault.
   Auth lands in Phase 1.
 - `/api/merchant/receipts` is unauthenticated and meant for local/demo use —
-  Phase 3 adds real merchant API keys before this is exposed publicly.
+  Phase 3 adds real merchant API keys before this is exposed publicly. It
+  intentionally marks everything it creates `UNVERIFIED`, not
+  `MERCHANT_VERIFIED`: that label must mean "an authenticated merchant key
+  created this," which doesn't exist until Phase 3 lands.
 - NFC/Bluetooth capture isn't implemented yet — see the roadmap for why
   that's sequenced after the claim-token protocol and merchant API rather
   than first (platform + retailer-partnership dependent, not just code).
