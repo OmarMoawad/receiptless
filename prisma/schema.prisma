@@ -1,0 +1,51 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum ReceiptSource {
+  QR
+  PHOTO
+  MANUAL
+  NFC
+  BLUETOOTH
+  EMAIL
+}
+
+enum Category {
+  GROCERIES
+  DINING
+  TRANSPORT
+  UTILITIES
+  HEALTH
+  SHOPPING
+  ENTERTAINMENT
+  TRAVEL
+  EDUCATION
+  OTHER
+}
+
+model Receipt {
+  id         String        @id @default(cuid())
+  merchant   String
+  amount     Float
+  currency   String        @default("USD")
+  category   Category      @default(OTHER)
+  purchasedAt DateTime
+  source     ReceiptSource @default(MANUAL)
+  imageUrl   String?
+  rawPayload String?
+  notes      String?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@index([purchasedAt])
+  @@index([category])
+}

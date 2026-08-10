@@ -1,36 +1,45 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# receiptless
 
-## Getting Started
+Paperless receipts, tracked automatically. Capture receipts by scanning a QR
+code or uploading a photo, and see monthly/annual spend broken down by
+category — installable as a PWA on any phone or desktop.
 
-First, run the development server:
+See [ROADMAP.md](./ROADMAP.md) for the full 1-year plan (native apps,
+NFC/Bluetooth capture, POS/retailer integrations, marketplace launch).
+
+## Stack
+
+- [Next.js](https://nextjs.org) (App Router) + TypeScript + Tailwind
+- [Prisma](https://www.prisma.io) + SQLite (dev) via the `better-sqlite3` driver adapter
+- [jsQR](https://github.com/cozmo/jsQR) for in-browser QR decoding
+- [Recharts](https://recharts.org) for the spend dashboards
+- PWA manifest + service worker for install-to-home-screen on any device
+
+## Getting started
 
 ```bash
+npm install
+cp .env.example .env
+npx prisma generate
+npx prisma migrate dev
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Project structure
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `src/app/page.tsx` — dashboard (monthly/annual charts)
+- `src/app/receipts` — receipt list + capture flow (QR / photo / manual)
+- `src/app/api/receipts` — create/list receipts
+- `src/app/api/reports` — monthly/annual aggregation endpoints
+- `src/lib/parseReceipt.ts` — QR payload parser (seed for per-retailer adapters, see roadmap Phase 4)
+- `prisma/schema.prisma` — `Receipt` model
 
-## Learn More
+## Notes
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Receipt photos are currently stored inline as data URLs for MVP simplicity;
+  Phase 1 of the roadmap moves this to object storage (S3/R2).
+- There's no auth yet — this is a single-user local MVP. Auth lands in Phase 1.
+- NFC/Bluetooth capture isn't implemented yet — see the roadmap for why that's
+  sequenced later (platform + retailer-partnership dependent, not just code).
