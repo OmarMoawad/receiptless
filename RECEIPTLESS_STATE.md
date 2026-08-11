@@ -342,17 +342,20 @@ entirely rather than trying to harden it further:
   still null in the database; `POST` claimed it; a follow-up `GET`
   correctly reported `409`; the page correctly rendered "Claim this
   receipt?" before claiming and "Already claimed" after; a forged
-  cross-origin `POST` was rejected with `403`. **Not verified**: an
-  actual browser click on the `<ClaimButton>` itself — Chrome automation
-  can't reach `localhost` in this sandboxed setup, the same known gap
-  IDent's own OAuth click-through hit. The button's Server Action calls
-  the identical `resolveClaim` the POST route uses (verified above), so
-  the underlying claim mechanics are covered either way, but the actual
-  React `useActionState` wiring — form submission, pending/disabled
-  state, error message rendering — has not been exercised in a real
-  browser. Do that click-through with Omar before trusting the UI layer
-  specifically, the same way IDent's Gmail OAuth flow needed a
-  human-in-the-loop check.
+  cross-origin `POST` was rejected with `403`.
+- **`<ClaimButton>` real-browser click-through — done, with Omar,
+  2026-08-11** (same day as this follow-up): Chrome automation still
+  can't reach `localhost` in this sandbox, so Omar registered a test
+  account via a `fetch` snippet in his own browser's console, opened a
+  generated claim link, and clicked through it himself, same
+  human-in-the-loop pattern IDent's Gmail OAuth flow needed. Confirmed:
+  the page showed the "Claim this receipt?" preview first (merchant,
+  amount, items) with nothing claimed yet; clicking "Claim this receipt"
+  updated in place — no page reload — to the green-checkmark "Receipt
+  claimed" state with the same details; reloading the same URL
+  afterward correctly showed "Already claimed" instead of the button
+  again. The `useActionState`/Server Action wiring is now confirmed
+  working end to end, not just at the `resolveClaim` level.
 - **Also updated per review**: `ROADMAP.md`'s "Sponsored receipts"
   section gained a hard constraint (sponsored content must never alter/
   obscure/mix with actual receipt data; eventual data model keeps it in
