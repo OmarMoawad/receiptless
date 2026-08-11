@@ -2,6 +2,8 @@
 
 **Every receipt. Automatically. Forever.**
 
+![receiptless roadmap progress](docs/progress.svg)
+
 An interoperable digital receipt identity and delivery layer. A purchase
 generates a structured digital receipt that reaches your private receipt
 vault through whichever channel is available — QR claim link, photo, email,
@@ -17,7 +19,9 @@ apps with platform NFC, and financial intelligence.
 
 See [RECEIPTLESS_STATE.md](./RECEIPTLESS_STATE.md) for exactly what's
 currently done vs. pending, and the session-by-session cadence Phase 1 is
-being built in — read that before writing any code here.
+being built in — read that before writing any code here. The progress bar
+above is regenerated after each session
+(`node scripts/generate-progress-svg.mjs`).
 
 ## Stack
 
