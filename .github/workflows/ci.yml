@@ -37,12 +37,21 @@ jobs:
 
       - run: npm install
 
-      - run: npm run typecheck
-
+      # Must run before typecheck/build/test: generates @/generated/prisma
+      # (the Prisma client's own types), which nothing in this repo commits.
       - run: npm run db:generate
 
       - run: npm run db:migrate
 
       - run: npm run test
 
+      # Must run before typecheck: Next.js generates its own ambient types
+      # (.next/types — e.g. layout.tsx's LayoutProps) as a side effect of
+      # building, and nothing commits those either. `next build` runs its
+      # own internal type-check too, so this ordering means a type error
+      # surfaces here first either way — the standalone typecheck step
+      # below is still worth keeping since it also covers *.test.ts files,
+      # which next build's internal check does not.
       - run: npm run build
+
+      - run: npm run typecheck
