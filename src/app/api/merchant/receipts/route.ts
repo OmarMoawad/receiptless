@@ -27,9 +27,16 @@ export async function POST(request: NextRequest) {
   }
   const data = parsed.data;
 
+  // update is intentionally always {}, never re-setting website from this
+  // call's input: this endpoint is unauthenticated (see the doc comment
+  // above), so letting it overwrite an *existing* merchant's canonical
+  // website would let anyone who knows a merchant name mutate shared
+  // reference data. Only a brand-new Merchant row gets a website, from its
+  // own creation payload. Revisit once Phase 3 merchant API keys exist and
+  // an update path can be tied to an authenticated, authorized merchant.
   const merchant = await prisma.merchant.upsert({
     where: { name: data.merchant },
-    update: data.merchantWebsite ? { website: data.merchantWebsite } : {},
+    update: {},
     create: { name: data.merchant, website: data.merchantWebsite },
   });
 

@@ -94,7 +94,10 @@ the merchant API — see `src/lib/parseReceipt.ts`.
   Phase 3 adds real merchant API keys before this is exposed publicly. It
   intentionally marks everything it creates `UNVERIFIED`, not
   `MERCHANT_VERIFIED`: that label must mean "an authenticated merchant key
-  created this," which doesn't exist until Phase 3 lands.
+  created this," which doesn't exist until Phase 3 lands. It also never
+  updates an *existing* merchant's `website` from request input — only sets
+  one when creating a brand-new `Merchant` row — since an unauthenticated
+  caller shouldn't be able to mutate shared reference data by name alone.
 - NFC/Bluetooth capture isn't implemented yet — see the roadmap for why
   that's sequenced after the claim-token protocol and merchant API rather
   than first (platform + retailer-partnership dependent, not just code).
