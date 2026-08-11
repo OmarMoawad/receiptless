@@ -1,4 +1,6 @@
+import { cookies } from "next/headers";
 import Link from "next/link";
+import { getCurrentUserFromCookies } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { formatMinorUnits } from "@/lib/money";
 
@@ -17,16 +19,36 @@ export default async function ReceiptsPage({
 }) {
   const { q } = await searchParams;
 
+  const cookieStore = await cookies();
+  const user = await getCurrentUserFromCookies(cookieStore);
+  if (!user) {
+    return (
+      <main className="flex flex-col items-center gap-2 p-6 text-center">
+        <h1 className="text-xl font-semibold">Sign in to view your vault</h1>
+        <p className="text-neutral-500 text-sm">
+          Your receipts are only visible while signed in.
+        </p>
+      </main>
+    );
+  }
+
+  // Found via a real click-through: this page used to query every user's
+  // receipts with no ownerId filter at all, bypassing Session 3's
+  // tenant-isolation work entirely since it never goes through
+  // /api/receipts. Fixed the same way every API route already is.
   const receipts = await prisma.receipt.findMany({
-    where: q
-      ? {
-          OR: [
-            { merchant: { name: { contains: q } } },
-            { notes: { contains: q } },
-            { items: { some: { name: { contains: q } } } },
-          ],
-        }
-      : undefined,
+    where: {
+      ownerId: user.userId,
+      ...(q
+        ? {
+            OR: [
+              { merchant: { name: { contains: q } } },
+              { notes: { contains: q } },
+              { items: { some: { name: { contains: q } } } },
+            ],
+          }
+        : {}),
+    },
     include: { merchant: true, items: true },
     orderBy: { purchasedAt: "desc" },
     take: 100,

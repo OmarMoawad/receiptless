@@ -1,4 +1,6 @@
+import { cookies } from "next/headers";
 import Link from "next/link";
+import { getCurrentUserFromCookies } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { fromMinorUnits } from "@/lib/money";
 import {
@@ -9,9 +11,15 @@ import {
 
 export const dynamic = "force-dynamic";
 
-async function getMonthlyData(year: number) {
+// Found via a real click-through: both queries below used to run with no
+// ownerId filter at all, aggregating every user's spend together — this
+// page bypasses /api/reports/* entirely (its own direct Prisma queries),
+// so it never inherited Session 3's tenant-isolation work. Fixed the same
+// way those routes already are.
+async function getMonthlyData(ownerId: string, year: number) {
   const receipts = await prisma.receipt.findMany({
     where: {
+      ownerId,
       purchasedAt: { gte: new Date(year, 0, 1), lt: new Date(year + 1, 0, 1) },
     },
   });
@@ -31,8 +39,8 @@ async function getMonthlyData(year: number) {
   return { months, byCategory, count: receipts.length };
 }
 
-async function getAnnualData() {
-  const receipts = await prisma.receipt.findMany();
+async function getAnnualData(ownerId: string) {
+  const receipts = await prisma.receipt.findMany({ where: { ownerId } });
   const byYear: Record<number, number> = {};
   for (const r of receipts) {
     const y = r.purchasedAt.getFullYear();
@@ -44,10 +52,21 @@ async function getAnnualData() {
 }
 
 export default async function Home() {
+  const cookieStore = await cookies();
+  const user = await getCurrentUserFromCookies(cookieStore);
+  if (!user) {
+    return (
+      <main className="flex flex-col items-center gap-2 p-6 text-center">
+        <h1 className="text-xl font-semibold">receiptless</h1>
+        <p className="text-neutral-500 text-sm">Sign in to see your spend.</p>
+      </main>
+    );
+  }
+
   const currentYear = new Date().getFullYear();
   const [{ months, byCategory, count }, annual] = await Promise.all([
-    getMonthlyData(currentYear),
-    getAnnualData(),
+    getMonthlyData(user.userId, currentYear),
+    getAnnualData(user.userId),
   ]);
 
   const yearTotal = months.reduce((sum, m) => sum + m.total, 0);

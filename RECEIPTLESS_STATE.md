@@ -460,13 +460,59 @@ covered, just a correctness fix to already-claimed scope.
   Confirmed a second user gets `404` on both `GET` and `POST` against the
   first user's receipt. Confirmed replacing the photo left the *old*
   object key genuinely gone from MinIO (`mc stat` against it 404s) while
-  the new one exists. **Not verified**: the `receipts/new` page's own
-  upload UI in a real browser — same Chrome-automation-can't-reach-
-  localhost gap as the claim flow, and API-level correctness is fully
-  proven above the way register/login's UI-less API already sets
-  precedent for in this repo. Offer Omar a click-through of this one too
-  before treating the UI layer specifically as trusted, same discipline
-  as the Session 3 follow-up's `<ClaimButton>` check.
+  the new one exists.
+- **`receipts/new` upload UI real-browser click-through — done, with
+  Omar, 2026-08-11**: registered via a console `fetch` snippet, uploaded
+  a real photo through the actual form, and saved successfully. This
+  click-through is exactly what surfaced the Session 4 follow-up bug
+  directly below — the receipt saved correctly but didn't appear in
+  Omar's own vault list, which led straight to a real, more serious
+  finding than anything about the upload path itself.
+
+## Completed components (Session 4 follow-up — vault pages had no owner scoping at all)
+
+Omar's own click-through of the upload flow above surfaced this: his
+saved receipt didn't show up on `/receipts`. The actual cause was worse
+than a pagination quirk. `src/app/receipts/page.tsx` (the vault list) and
+`src/app/page.tsx` (the home dashboard) both query `prisma.receipt`
+**directly**, as Server Components — neither one goes through
+`/api/receipts` or `/api/reports/*`, so **neither one ever inherited
+Session 3's tenant-isolation work at all**. Before this fix, both pages
+had zero auth check and zero `ownerId` filter: `/receipts` listed every
+user's receipts mixed together (Omar's own receipt was merely pushed
+past the hardcoded `take: 100` by ~260 unrelated test receipts from this
+session's own testing, which is what he actually observed), and `/`
+aggregated every user's spend into one dashboard. This is a real gap in
+Session 3's own claimed "hard acceptance criterion, not just getting
+`ownerId` into Prisma" — the criterion was met for every route that goes
+through the API, but these two pages were never audited because they
+don't.
+
+- Both pages now read the session via `getCurrentUserFromCookies`
+  (`src/lib/auth.ts`, the same Server Component helper the claim page
+  uses) and show a sign-in prompt instead of any data when logged out.
+  Both queries now filter by `ownerId`, matching `/api/receipts` and
+  `/api/reports/*` exactly.
+- **Manually verified against the live dev server**: a logged-out
+  request to `/receipts` and `/` both show the sign-in prompt with zero
+  receipt data leaked; a fresh test user sees only their own receipt; a
+  second test user querying the same page does not see the first user's
+  receipt at all. Confirmed directly against the database that both of
+  Omar's own uploaded receipts have his real `ownerId` and will now
+  appear on his own `/receipts` page.
+- **No dedicated automated test added for these two pages** — this repo
+  has no existing convention for testing Server Component pages (the
+  claim page has none either, per Session 3's own notes); the fix itself
+  is a straightforward mechanical match to the already-tested API-route
+  pattern, and it was verified live end-to-end above. Worth revisiting if
+  this repo ever adds page-level test infrastructure.
+- **Lesson for future sessions**: any session that changes tenant-scoping
+  semantics (like Session 3's `ownerId` work) needs to grep for *every*
+  direct `prisma.*` call across `src/app/**/page.tsx`, not just
+  `src/app/api/**/route.ts` — a page that queries the database directly
+  bypasses whatever isolation the API layer enforces entirely, and
+  nothing about Next.js's App Router makes that obvious from the file
+  structure alone.
 
 ## Session cadence for Phase 1 — work one per day, in order
 
