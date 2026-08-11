@@ -218,23 +218,49 @@ gaps.
    these are API-only for now, same as session 1's infra work; register/
    login forms are UI work for whichever later session needs them.
 
-3. **Scope the vault to a user.** Add `ownerId` to `Receipt` (not to
-   `Merchant` — a merchant is shared reference data across users, e.g.
-   "Starbucks" is the same row for everyone). Every existing receipt-facing
-   route (`/api/receipts`, `/api/search`, `/api/reports/*`) requires a
-   session and scopes its query by `ownerId`. The claim-token flow gets a
-   natural extension instead of a redesign: a merchant-pushed receipt is
-   created with `ownerId: null` (unclaimed), and visiting `/claim/[token]`
-   while logged in attaches `ownerId` at claim time. Make the attach step
-   one atomic transaction, not two separate writes an interrupted request
+3. **Scope the vault to a user — treat cross-user isolation as this
+   session's hard acceptance criterion, not just getting `ownerId` into
+   Prisma.** Add `ownerId` to `Receipt` (not to `Merchant` — a merchant is
+   shared reference data across users, e.g. "Starbucks" is the same row
+   for everyone). Every existing receipt-facing route (`/api/receipts`,
+   `/api/search`, `/api/reports/*`) requires a session (`getCurrentUser`,
+   session 2) and scopes its query by `ownerId`. The claim-token flow gets
+   a natural extension instead of a redesign: a merchant-pushed receipt is
+   created with `ownerId: null` (unclaimed) and invisible to ordinary
+   users' lists/search until claimed, and visiting `/claim/[token]` while
+   logged in attaches `ownerId` at claim time. Make the attach step one
+   atomic transaction, not two separate writes an interrupted request
    could split: verify the caller's session → look up the token where
    `claimedAt IS NULL` and not expired → in the same transaction, set
    `ownerId` to the caller and `claimedAt` to now → 409 if it was already
    claimed or the token doesn't resolve, same semantics `src/lib/claim.ts`
    already uses for the existing single-use check, just now also gated on
-   authentication before the claim can complete. Tests: one user can never
-   see another's receipts; the claim-and-attach flow works end to end;
-   claiming an already-claimed token 409s regardless of which user asks.
+   authentication before the claim can complete, and never reassignable
+   after a successful claim.
+
+   **CSRF, relevant starting this session specifically**: `SameSite=Lax`
+   (session 2) helps but shouldn't be the only thing standing between a
+   forged cross-site request and a mutating endpoint once claim attachment
+   — which reassigns account ownership from a URL — exists. At minimum,
+   mutating routes (claim attach, and anything else that writes) should
+   verify the request's `Origin`/`Host` matches this app's own origin
+   before proceeding; a dedicated CSRF token is reasonable to add later
+   for higher-risk actions, not required this session.
+
+   **Non-negotiable test list for this session** (a review of session 2
+   sharpened this from the original two-line test note — this is the real
+   tenant-isolation gate, not a suggestion):
+   1. Alice cannot list Bob's receipts.
+   2. Alice cannot fetch Bob's receipt by guessed ID.
+   3. Alice cannot search Bob's receipts.
+   4. Alice's reports never aggregate Bob's data.
+   5. An anonymous (logged-out) request cannot attach ownership via claim.
+   6. Logged-in Alice can claim an unused receipt.
+   7. Bob cannot claim it afterward (409).
+   8. Two simultaneous claims of the same token yield exactly one winner.
+   9. A merchant-created unclaimed receipt stays invisible to ordinary
+      users' lists/search until claimed.
+   10. `ownerId` cannot be reassigned after a successful claim.
 
 4. **Real object storage for photos (S3/R2).** Replace the inline
    `data:image/*` URL storage (Phase 0's deliberate placeholder — see
@@ -318,6 +344,15 @@ cadence.
   don't let it go undecided past it either.
 - **Storage/email/hosting providers** (Sessions 4, 6, 8) — Omar's choice,
   not something to guess at or default silently.
+- **Session cleanup/limits, not needed yet**: every login currently issues
+  a new `Session` row with no cap on concurrent sessions per user and no
+  cleanup of expired/revoked ones — fine functionally, but the table will
+  grow unbounded over real usage. No UI decision needed now (unlimited
+  devices vs. a cap vs. an "active sessions" account page with
+  log-out-other-devices are all still open), but a periodic delete of
+  expired/revoked rows is worth adding once this sees real traffic —
+  flagged by the same external review that shaped Session 3's isolation
+  checklist above, not urgent enough to block any current session.
 
 ## Hard gate: no real user data before ops infra exists
 
