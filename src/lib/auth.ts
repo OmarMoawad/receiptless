@@ -13,3 +13,15 @@ export async function getCurrentUser(request: NextRequest): Promise<Authenticate
   const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
   return token ? validateSession(token) : null;
 }
+
+/**
+ * Same as `getCurrentUser`, for Server Components (e.g. `/claim/[token]`'s
+ * page) that read `next/headers()`'s cookie store instead of a
+ * `NextRequest` — there's no request object available there.
+ */
+export async function getCurrentUserFromCookies(
+  cookieStore: { get(name: string): { value: string } | undefined }
+): Promise<AuthenticatedUser | null> {
+  const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+  return token ? validateSession(token) : null;
+}

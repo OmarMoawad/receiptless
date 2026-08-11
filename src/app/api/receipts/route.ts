@@ -1,13 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { createReceiptSchema } from "@/lib/validation";
 
+/**
+ * Session 3 (RECEIPTLESS_STATE.md): every receipt-facing route requires a
+ * session and scopes its query by `ownerId` — a receipt with no owner
+ * (merchant-pushed, not yet claimed via /api/claim/[token]) never appears
+ * here, and one user's vault never leaks into another's list/search/reports.
+ */
 export async function GET(request: NextRequest) {
+  const user = await getCurrentUser(request);
+  if (!user) return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+
   const { searchParams } = new URL(request.url);
+  const id = searchParams.get("id");
   const year = searchParams.get("year");
   const month = searchParams.get("month");
 
-  const where: Record<string, unknown> = {};
+  const where: Record<string, unknown> = { ownerId: user.userId };
+  if (id) where.id = id;
   if (year) {
     const y = Number(year);
     const m = month ? Number(month) : null;
@@ -25,6 +37,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const user = await getCurrentUser(request);
+  if (!user) return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+
   const body = await request.json().catch(() => null);
   if (body === null) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
@@ -47,6 +62,7 @@ export async function POST(request: NextRequest) {
 
   const receipt = await prisma.receipt.create({
     data: {
+      ownerId: user.userId,
       merchantId: merchant.id,
       currency: data.currency,
       totalMinor: data.totalMinor,

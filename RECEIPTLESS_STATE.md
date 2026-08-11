@@ -10,27 +10,27 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-Last updated: 2026-08-11 — **Session 2 done** (user accounts: schema +
-register/login — see "Completed components" below for the full writeup).
-Session 1 (Postgres migration + testing/CI baseline) done earlier the
-same day. This file was created earlier still, then revised after an
-external review of its initial version (overclaimed Phase 0 as "verified"
-with zero automated tests behind that word, had a real contradiction
-about which session finishes Phase 1's email-ingestion scope, and two
-concrete Phase-0 bugs got fixed alongside the doc revision).
-Retroactively logs Phase 0 (ROADMAP.md) as done, and breaks Phase 1 into
-a **session-by-session cadence** (below) instead of one big phase-sized
-task, so receiptless can be worked in daily increments the same way
-IDent's Phase 0B has been — pick up this file, do the next session,
-update it, commit, push.
+Last updated: 2026-08-11 — **Session 3 done** (scope the vault to a user:
+`ownerId`, owner-scoped routes, atomic claim+attach, tenant-isolation test
+suite — see "Completed components" below for the full writeup). Session 2
+(user accounts) and Session 1 (Postgres migration + testing/CI baseline)
+were done earlier the same day. This file was created earlier still, then
+revised after an external review of its initial version (overclaimed
+Phase 0 as "verified" with zero automated tests behind that word, had a
+real contradiction about which session finishes Phase 1's email-ingestion
+scope, and two concrete Phase-0 bugs got fixed alongside the doc
+revision). Retroactively logs Phase 0 (ROADMAP.md) as done, and breaks
+Phase 1 into a **session-by-session cadence** (below) instead of one big
+phase-sized task, so receiptless can be worked in daily increments the
+same way IDent's Phase 0B has been — pick up this file, do the next
+session, update it, commit, push.
 
 ## Current phase
 
 **Phase 1 — Reliable ingestion + accounts** (ROADMAP.md), in progress.
-Sessions 1 (Postgres + testing/CI baseline) and 2 (user accounts) are
-done — see "Completed components" below. Phase 0 (canonical foundation)
-was done before this
-file existed.
+Sessions 1 (Postgres + testing/CI baseline), 2 (user accounts), and 3
+(vault scoped to a user) are done — see "Completed components" below.
+Phase 0 (canonical foundation) was done before this file existed.
 
 Phase 1 is one paragraph in ROADMAP.md but six real, multi-day pieces of
 work (hosting, accounts, storage, OCR, email ingestion, parser adapters).
@@ -195,6 +195,90 @@ new work should look like this entry, not like Phase 0's.
   logout → `/me` again correctly 401s — confirms the cookie contract
   works end to end against real Postgres, not just in-process.
 
+## Completed components (Session 3 — scope the vault to a user)
+
+- **`Receipt.ownerId`** (migration `20260811191029_add_receipt_owner`) —
+  nullable, indexed, `onDelete: SetNull`. Null means unclaimed: a
+  merchant-pushed receipt (`/api/merchant/receipts`) is created with no
+  `ownerId`, unchanged from before this session (the field simply wasn't
+  set), and stays invisible to every owner-scoped route until claimed.
+- **Every receipt-facing route requires a session and scopes its query by
+  `ownerId`**: `GET`/`POST /api/receipts` (`GET` also takes an `id` query
+  param now, still owner-scoped — a guessed ID from another user's vault
+  resolves to an empty list, not their receipt), `GET /api/search`, `GET
+  /api/reports/{monthly,annual}`. All four 401 without a valid session
+  cookie (`getCurrentUser`, Session 2).
+- **`src/lib/claim.ts`'s `resolveClaim` now takes `userId` and does the
+  claim+attach atomically**: an unauthenticated caller (`userId: null`) is
+  rejected *before* the token is even read, so an anonymous request can
+  never burn a token the real owner hasn't claimed yet. The claiming
+  update sets `claimedAt` and `ownerId` together in one conditional
+  `updateMany` guarded on `claimedAt: null` (and non-expiry) — the same
+  guard Session 1/Phase 0 already used for single-use semantics, now also
+  gated on authentication and never reassignable after a successful
+  claim, since the guarded update can only ever match a still-unclaimed
+  row.
+- **`src/lib/origin-check.ts`** (new) — `isSameOrigin` (route handlers,
+  reading `NextRequest.nextUrl.origin`) and `isSameOriginFromHeaders`
+  (Server Components reading `next/headers()`, which has no `nextUrl` —
+  reconstructs the expected origin from `Host` + `X-Forwarded-Proto`).
+  Both reject a *present-and-mismatched* `Origin`/`Referer`, and treat a
+  missing one as same-origin rather than blocking it — a same-site
+  defense-in-depth check, not a CSRF token (see "Known open decisions"
+  below, unchanged this session). Wired into both claim-attach paths:
+  `GET /api/claim/[token]` (403 before touching token state) and the
+  `/claim/[token]` page itself, which turned out to be the actual
+  claim-attach path real users hit (`SameSite=Lax` still allows the
+  session cookie on a top-level cross-site GET navigation, which is
+  exactly how someone could otherwise be tricked into attaching a receipt
+  they didn't choose to claim).
+- **`/claim/[token]`'s page** (`src/app/claim/[token]/page.tsx`) — the
+  route handler above and this page were two independent, out-of-sync
+  callers of `resolveClaim` before this session (the page is what
+  `QRScanner`'s claim-link handling actually navigates to; the API route
+  has no in-app caller today, existing for non-browser clients like the
+  `receiptless://` scheme). Updated in lockstep: reads the session via a
+  new `getCurrentUserFromCookies` (`src/lib/auth.ts`, the Server Component
+  equivalent of `getCurrentUser`), shows a "sign in to claim this receipt"
+  state when unauthenticated, and checks `isSameOriginFromHeaders` before
+  calling `resolveClaim` at all.
+- **15 new tests** (49 total, up from 34): the full 10-item
+  tenant-isolation checklist below, plus 401-without-session and
+  ownership-recorded-on-create coverage for the newly owner-scoped
+  routes. A shared `src/test/auth-helpers.ts` (`registerTestUser`,
+  `cookieHeader`) factors out the register-then-extract-cookie pattern
+  Session 2's own tests already used ad hoc, now reused across
+  `receipts`, `search`, `reports/{monthly,annual}`, and `claim` tests.
+  `npm run typecheck`, `npm run test`, and `npm run build` all pass.
+  **Also manually verified against the live dev server**: registered two
+  real users, pushed a merchant receipt, claimed it as one user via both
+  the API route and the page, confirmed the other user's list/search/
+  reports never see it, confirmed a second claim attempt (same user and a
+  different user) both 409, confirmed an unauthenticated request to
+  `/api/receipts` 401s without consuming anything, and confirmed a
+  forged `Origin: https://evil.example` header gets rejected with 403 on
+  both the API route and the page — all against real Postgres, not just
+  vitest's in-process test doubles.
+
+**Tenant-isolation checklist (all 10 items, all covered by tests above):**
+1. Alice cannot list Bob's receipts — `receipts/route.test.ts`.
+2. Alice cannot fetch Bob's receipt by guessed ID — `receipts/route.test.ts`
+   (`?id=` query param).
+3. Alice cannot search Bob's receipts — `search/route.test.ts`.
+4. Alice's reports never aggregate Bob's data —
+   `reports/{monthly,annual}/route.test.ts`.
+5. An anonymous request cannot attach ownership via claim —
+   `claim/[token]/route.test.ts`.
+6. Logged-in Alice can claim an unused receipt — same file.
+7. Bob cannot claim it afterward (409) — same file.
+8. Two simultaneous claims of the same token yield exactly one winner —
+   same file.
+9. A merchant-created unclaimed receipt stays invisible until claimed —
+   `receipts/route.test.ts`.
+10. `ownerId` cannot be reassigned after a successful claim — verified
+    directly (`stored?.ownerId` checked against the winner) in
+    `claim/[token]/route.test.ts`'s concurrent-claim test.
+
 ## Session cadence for Phase 1 — work one per day, in order
 
 Each session is scoped to be buildable, testable, and shippable in roughly
@@ -218,49 +302,10 @@ gaps.
    these are API-only for now, same as session 1's infra work; register/
    login forms are UI work for whichever later session needs them.
 
-3. **Scope the vault to a user — treat cross-user isolation as this
-   session's hard acceptance criterion, not just getting `ownerId` into
-   Prisma.** Add `ownerId` to `Receipt` (not to `Merchant` — a merchant is
-   shared reference data across users, e.g. "Starbucks" is the same row
-   for everyone). Every existing receipt-facing route (`/api/receipts`,
-   `/api/search`, `/api/reports/*`) requires a session (`getCurrentUser`,
-   session 2) and scopes its query by `ownerId`. The claim-token flow gets
-   a natural extension instead of a redesign: a merchant-pushed receipt is
-   created with `ownerId: null` (unclaimed) and invisible to ordinary
-   users' lists/search until claimed, and visiting `/claim/[token]` while
-   logged in attaches `ownerId` at claim time. Make the attach step one
-   atomic transaction, not two separate writes an interrupted request
-   could split: verify the caller's session → look up the token where
-   `claimedAt IS NULL` and not expired → in the same transaction, set
-   `ownerId` to the caller and `claimedAt` to now → 409 if it was already
-   claimed or the token doesn't resolve, same semantics `src/lib/claim.ts`
-   already uses for the existing single-use check, just now also gated on
-   authentication before the claim can complete, and never reassignable
-   after a successful claim.
-
-   **CSRF, relevant starting this session specifically**: `SameSite=Lax`
-   (session 2) helps but shouldn't be the only thing standing between a
-   forged cross-site request and a mutating endpoint once claim attachment
-   — which reassigns account ownership from a URL — exists. At minimum,
-   mutating routes (claim attach, and anything else that writes) should
-   verify the request's `Origin`/`Host` matches this app's own origin
-   before proceeding; a dedicated CSRF token is reasonable to add later
-   for higher-risk actions, not required this session.
-
-   **Non-negotiable test list for this session** (a review of session 2
-   sharpened this from the original two-line test note — this is the real
-   tenant-isolation gate, not a suggestion):
-   1. Alice cannot list Bob's receipts.
-   2. Alice cannot fetch Bob's receipt by guessed ID.
-   3. Alice cannot search Bob's receipts.
-   4. Alice's reports never aggregate Bob's data.
-   5. An anonymous (logged-out) request cannot attach ownership via claim.
-   6. Logged-in Alice can claim an unused receipt.
-   7. Bob cannot claim it afterward (409).
-   8. Two simultaneous claims of the same token yield exactly one winner.
-   9. A merchant-created unclaimed receipt stays invisible to ordinary
-      users' lists/search until claimed.
-   10. `ownerId` cannot be reassigned after a successful claim.
+3. ~~**Scope the vault to a user**~~ — done (see "Completed components
+   (Session 3)" above): `ownerId` on `Receipt`, every receipt-facing route
+   owner-scoped, atomic claim+attach, Origin/Host check on both claim
+   paths, full 10-item tenant-isolation checklist covered by tests.
 
 4. **Real object storage for photos (S3/R2).** Replace the inline
    `data:image/*` URL storage (Phase 0's deliberate placeholder — see
@@ -370,10 +415,10 @@ env-gate on top of that before any public deployment.
 
 ## Next task
 
-**Session 3 — Scope the vault to a user.** See "Session cadence" above
-for full scope: add `ownerId` to `Receipt`, scope every existing
-receipt-facing route by it via `src/lib/auth.ts`'s `getCurrentUser`
-(session 2), and turn the claim-token flow's resolution into the
-account-linking step (atomic transaction: verify session → match unused
-token → assign `ownerId` → set `claimedAt`). Nothing blocks starting this
-immediately.
+**Session 4 — Real object storage for photos (S3/R2).** See "Session
+cadence" above for full scope: replace the inline `data:image/*` URL
+storage with real uploads to S3/R2, storing only the object key/URL on
+`Receipt`. **Needs Omar**: creating the actual bucket + credentials — not
+a blocker for starting, since the upload path can be written against env
+vars and tested locally against an S3-compatible target (e.g. MinIO in
+docker-compose) without waiting on a real bucket.

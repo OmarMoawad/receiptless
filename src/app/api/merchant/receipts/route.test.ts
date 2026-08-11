@@ -41,6 +41,8 @@ describe("POST /api/merchant/receipts", () => {
     const receipt = await prisma.receipt.findUnique({ where: { id: body.receiptId } });
     expect(receipt?.verification).toBe("UNVERIFIED");
     expect(receipt?.claimedAt).toBeNull();
+    // Session 3: unclaimed until someone attaches it via /api/claim/[token].
+    expect(receipt?.ownerId).toBeNull();
   });
 
   it("rejects invalid JSON with 400", async () => {

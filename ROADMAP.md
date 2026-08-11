@@ -190,6 +190,59 @@ Two paths, not mutually exclusive:
 Either path is a partnerships/BD-heavy phase, not a solo-coding phase —
 sequenced here deliberately, after the API/SDK exists to integrate against.
 
+## Sponsored receipts (documented intent, not built)
+
+A small, opt-in revenue stream that works whether a receipt is digital or
+physical: a merchant, or a third-party sponsor unrelated to that specific
+purchase (the way transit tickets and parking receipts already carry
+local ad slots), pays for a short, clearly-labeled footer line — *"This
+receipt was sponsored by {Sponsor}"* — shown on the digital receipt and,
+eventually, printed on the physical paper strip too.
+
+- **Digital receipts**: a `sponsorLine` (display text) + optional
+  `sponsorUrl`, set at the `Merchant` level (a default for every receipt
+  from that merchant) with an optional per-`Receipt` override for
+  one-off sponsorships. Rendered as a visually and structurally separate
+  footer everywhere a receipt is displayed — vault list, receipt detail,
+  the `/claim/[token]` page — never mixed into line-item or total data,
+  the same discipline the `VerificationLevel` ladder already applies to
+  keeping "what a merchant attests" separate from "what receiptless
+  infers."
+- **Printed receipts**: the harder half, and the reason this is
+  documented rather than built now — receiptless doesn't print anything
+  itself; the physical receipt comes out of the merchant's own POS/
+  terminal printer. This only becomes real once **Phase 4's terminal
+  integration** (above) exists: a payment-authorization terminal that
+  already calls `POST /api/merchant/receipts` at the point of sale is the
+  natural place to also return an ESC/POS-formatted footer command for
+  the receipt printer, so the sponsor line rides along on paper receipts
+  too, not just the digital claim flow. There is no print path to inject
+  a footer into before Phase 4 lands, so this half is sequenced strictly
+  after it, not before.
+- **Merchant API surface**: sponsor assignment is authenticated merchant
+  (or receiptless-sold sponsor slot) configuration for **Phase 3's**
+  merchant API/dashboard, not open input on the unauthenticated `POST
+  /api/merchant/receipts` MVP endpoint — the same "revisit once Phase 3
+  merchant API keys exist" discipline already applied to
+  `Merchant.website` (see RECEIPTLESS_STATE.md's Phase-0 fixes log, which
+  hit exactly this class of bug once already: unauthenticated input must
+  never be able to overwrite another merchant's shared reference data,
+  and a sponsor line is exactly that kind of shared, merchant-level
+  field).
+- **Commercial fit**: a fourth revenue lever alongside the three below —
+  small, high-volume, low-friction (a footer line, not an interruption),
+  and it monetizes the receipt itself rather than the vault or the user,
+  so it reaches even a receiptless user who never opens the app, since it
+  rides on the physical receipt they walk out with.
+
+Not scheduled as its own numbered session in Phase 1's cadence
+(RECEIPTLESS_STATE.md) — the digital half is buildable once Phase 3's
+merchant API exists, and the printed half strictly depends on Phase 4's
+terminal integration, neither of which exists yet. Revisit concrete scope
+and scheduling once those phases are real, the same "aspirational
+sequencing, not a committed schedule" caveat this roadmap already applies
+to Phases 3+ (see "What's genuinely hard here" below).
+
 ## Phase 5 — Native apps + platform NFC (Months 6–9)
 
 - React Native / Expo app for iOS and Android
@@ -236,6 +289,9 @@ side most willing to pay. Revenue is more plausible from:
 - **Businesses** — expense-management ingestion, accounting-platform integrations
 - **Manufacturers** — warranty/product registration data
 - **Consumers** — optional premium tier (extended history, advanced intelligence)
+- **Sponsors** — a paid "This receipt was sponsored by X" footer line on
+  digital and (eventually) printed receipts; see "Sponsored receipts"
+  above for the full writeup and its Phase 3/4 dependencies
 
 ## What's genuinely hard here — read this before trusting the roadmap blindly
 

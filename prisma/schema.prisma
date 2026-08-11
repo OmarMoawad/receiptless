@@ -56,6 +56,7 @@ model User {
   passwordHash String
   createdAt    DateTime  @default(now())
   sessions     Session[]
+  receipts     Receipt[]
 }
 
 // Only the sha256 hash of the bearer session-cookie value is stored — the
@@ -88,6 +89,14 @@ model Receipt {
   id       String   @id @default(cuid())
   merchant Merchant @relation(fields: [merchantId], references: [id])
   merchantId String
+
+  // Session 3 (RECEIPTLESS_STATE.md): null until claimed. A merchant-pushed
+  // receipt (see /api/merchant/receipts) is created with no owner and is
+  // invisible to any user's list/search until someone claims it via
+  // /api/claim/[token] while authenticated, which sets this atomically with
+  // claimedAt and never lets it be reassigned afterward (see src/lib/claim.ts).
+  owner   User?   @relation(fields: [ownerId], references: [id])
+  ownerId String?
 
   currency String @default("USD")
 
@@ -124,6 +133,7 @@ model Receipt {
   @@index([purchasedAt])
   @@index([category])
   @@index([merchantId])
+  @@index([ownerId])
 }
 
 model ReceiptItem {

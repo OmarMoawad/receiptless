@@ -1,6 +1,9 @@
+import { cookies, headers } from "next/headers";
 import Link from "next/link";
+import { getCurrentUserFromCookies } from "@/lib/auth";
 import { resolveClaim } from "@/lib/claim";
 import { formatMinorUnits } from "@/lib/money";
+import { isSameOriginFromHeaders } from "@/lib/origin-check";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +22,29 @@ export default async function ClaimPage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
-  const result = await resolveClaim(token);
+  const headersList = await headers();
+
+  if (!isSameOriginFromHeaders(headersList)) {
+    return (
+      <InfoPage
+        title="Link couldn't be verified"
+        body="Open this receipt link directly from your merchant or messages, not from another site."
+      />
+    );
+  }
+
+  const cookieStore = await cookies();
+  const user = await getCurrentUserFromCookies(cookieStore);
+  const result = await resolveClaim(token, user?.userId ?? null);
+
+  if (result.status === "unauthenticated") {
+    return (
+      <InfoPage
+        title="Sign in to claim this receipt"
+        body="This receipt link is only valid for a signed-in account — sign in, then open the link again."
+      />
+    );
+  }
 
   if (result.status === "not_found") {
     return (

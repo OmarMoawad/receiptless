@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 
 export type ClaimResult =
+  | { status: "unauthenticated" }
   | { status: "not_found" }
   | { status: "expired" }
   | { status: "already_claimed" }
@@ -14,23 +15,23 @@ function findWithRelations(id: string) {
 }
 
 /**
- * Resolves a claim token exactly once. A claim token is meant to behave
- * like a one-time-use credential: the first valid, unexpired request
- * claims the receipt; every request after that — even with the same
- * still-unexpired token — is rejected rather than silently re-serving the
- * receipt. That matters because nothing stops someone who saw the QR
- * before it was scanned from holding onto the token and replaying it.
+ * Resolves a claim token exactly once and — since Session 3
+ * (RECEIPTLESS_STATE.md) — attaches the resulting receipt to the
+ * authenticated caller's account in the same atomic step: verify the
+ * caller has a session, then in one conditional update, set both
+ * `ownerId` and `claimedAt` together, guarded on the token still being
+ * unclaimed and unexpired. There's no window between "check" and
+ * "claim+attach" for a second request (or an expiry) to slip in.
  *
- * The claim itself is an atomic conditional update (`updateMany` guarded
- * on `claimedAt: null`) so two near-simultaneous requests for the same
- * token can't both "win" the claim.
- *
- * There's no per-user ownership yet (no auth — see ROADMAP.md Phase 1), so
- * "claimed" currently just means "consumed," not "owned by a specific
- * customer." Once accounts exist, this is where the token should attach
- * the receipt to a User instead of merely flipping a timestamp.
+ * An unauthenticated caller is rejected *before* touching token state at
+ * all, so an anonymous request can never burn a token the real owner
+ * hasn't claimed yet. Once claimed, `ownerId` can never be reassigned —
+ * the guarded update only ever matches a row where `claimedAt` is still
+ * null.
  */
-export async function resolveClaim(token: string): Promise<ClaimResult> {
+export async function resolveClaim(token: string, userId: string | null): Promise<ClaimResult> {
+  if (!userId) return { status: "unauthenticated" };
+
   const receipt = await prisma.receipt.findUnique({
     where: { claimToken: token },
   });
@@ -46,12 +47,16 @@ export async function resolveClaim(token: string): Promise<ClaimResult> {
   }
 
   const { count } = await prisma.receipt.updateMany({
-    where: { id: receipt.id, claimedAt: null },
-    data: { claimedAt: new Date() },
+    where: {
+      id: receipt.id,
+      claimedAt: null,
+      OR: [{ claimTokenExpiresAt: null }, { claimTokenExpiresAt: { gt: new Date() } }],
+    },
+    data: { claimedAt: new Date(), ownerId: userId },
   });
 
   if (count === 0) {
-    // Lost the race to a concurrent claim of the same token.
+    // Lost the race to a concurrent claim, or expired between the read above and here.
     return { status: "already_claimed" };
   }
 

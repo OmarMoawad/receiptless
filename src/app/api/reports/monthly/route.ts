@@ -1,13 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { fromMinorUnits } from "@/lib/money";
 
+// Session 3 (RECEIPTLESS_STATE.md): scoped by `ownerId` — a report never
+// aggregates another user's spending, and an unclaimed receipt (no owner
+// yet) is never counted.
 export async function GET(request: NextRequest) {
+  const user = await getCurrentUser(request);
+  if (!user) return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+
   const { searchParams } = new URL(request.url);
   const year = Number(searchParams.get("year") ?? new Date().getFullYear());
 
   const receipts = await prisma.receipt.findMany({
     where: {
+      ownerId: user.userId,
       purchasedAt: {
         gte: new Date(year, 0, 1),
         lt: new Date(year + 1, 0, 1),
