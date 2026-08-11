@@ -235,6 +235,18 @@ eventually, printed on the physical paper strip too.
   so it reaches even a receiptless user who never opens the app, since it
   rides on the physical receipt they walk out with.
 
+**Hard constraint, non-negotiable when this is built**: sponsored content
+must never alter, obscure, or become indistinguishable from the actual
+merchant receipt data — no mixing a sponsor line into `notes`,
+`rawPayload`, or a `ReceiptItem`. The eventual data model should keep
+sponsorship in its own table (e.g. a `ReceiptSponsorship` row referencing
+`Receipt`/`Merchant`, not new columns bolted onto `Receipt` itself), the
+same separation-of-concerns discipline the `VerificationLevel` ladder
+already applies to keeping "what a merchant attests" distinct from "what
+receiptless infers." A receipt is a financial record first; sponsorship
+is a clearly-labeled, removable, auditable layer on top of it, never a
+dependency for basic receipt access.
+
 Not scheduled as its own numbered session in Phase 1's cadence
 (RECEIPTLESS_STATE.md) — the digital half is buildable once Phase 3's
 merchant API exists, and the printed half strictly depends on Phase 4's

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
-import { GET as claimGet } from "@/app/api/claim/[token]/route";
+import { POST as claimPost } from "@/app/api/claim/[token]/route";
 import { POST as merchantPost } from "@/app/api/merchant/receipts/route";
 import { cookieHeader, registerTestUser } from "@/test/auth-helpers";
 import { GET, POST } from "./route";
@@ -85,8 +85,11 @@ describe("GET /api/receipts", () => {
     const beforeClaim = await (await GET(listRequest(alice.token))).json();
     expect(beforeClaim.find((r: { id: string }) => r.id === receiptId)).toBeUndefined();
 
-    const claimResponse = await claimGet(
-      new NextRequest(`http://localhost/api/claim/${claimToken}`, { headers: cookieHeader(alice.token) }),
+    const claimResponse = await claimPost(
+      new NextRequest(`http://localhost/api/claim/${claimToken}`, {
+        method: "POST",
+        headers: cookieHeader(alice.token),
+      }),
       { params: Promise.resolve({ token: claimToken }) },
     );
     expect(claimResponse.status).toBe(200);

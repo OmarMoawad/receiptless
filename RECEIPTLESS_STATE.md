@@ -10,11 +10,14 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-Last updated: 2026-08-11 — **Session 3 done** (scope the vault to a user:
-`ownerId`, owner-scoped routes, atomic claim+attach, tenant-isolation test
-suite — see "Completed components" below for the full writeup). Session 2
-(user accounts) and Session 1 (Postgres migration + testing/CI baseline)
-were done earlier the same day. This file was created earlier still, then
+Last updated: 2026-08-11 — **Session 3 follow-up done** (same-day
+hardening after an external review of Session 3's own commit: claim
+attach no longer happens on `GET`, plus an expiry/already-claimed status
+fix — see "Completed components (Session 3 follow-up)" below). Session 3
+itself (scope the vault to a user: `ownerId`, owner-scoped routes, atomic
+claim+attach, tenant-isolation test suite), Session 2 (user accounts),
+and Session 1 (Postgres migration + testing/CI baseline) were all done
+earlier the same day. This file was created earlier still, then
 revised after an external review of its initial version (overclaimed
 Phase 0 as "verified" with zero automated tests behind that word, had a
 real contradiction about which session finishes Phase 1's email-ingestion
@@ -278,6 +281,88 @@ new work should look like this entry, not like Phase 0's.
 10. `ownerId` cannot be reassigned after a successful claim — verified
     directly (`stored?.ownerId` checked against the winner) in
     `claim/[token]/route.test.ts`'s concurrent-claim test.
+
+## Completed components (Session 3 follow-up — claim is no longer a GET)
+
+An external review of Session 3's own commit caught something real: the
+Origin/Host check added that session was defense-in-depth, but the actual
+gap it was covering for was structural, not just missing headers — claim
+attach was still reachable through `GET`, and GET is defined as a *safe*
+method (RFC 9110). A crawler, link-preview bot, or browser prefetch
+following a claim link could consume a token without any user action at
+all, no forged headers required. Fixed by removing the mutation from GET
+entirely rather than trying to harden it further:
+
+- **`src/lib/claim.ts`** gained `previewClaim(token)` — a read-only
+  lookup with no side effects, returning the same terminal states
+  (`not_found`/`expired`/`already_claimed`) plus `previewable` (with the
+  receipt, for display). `resolveClaim(token, userId)` — the mutating
+  atomic claim+attach from Session 3 — is unchanged in its own logic, but
+  is now documented and wired as POST-only.
+- **`/api/claim/[token]`**: `GET` now calls `previewClaim` and never
+  mutates (still requires a session, same as before — this changes
+  *when* claiming happens, not who can see a receipt). `POST` is new and
+  does the actual claim+attach, with the Origin/Host check from Session 3
+  moved here since this is now the only mutating entry point.
+- **`/claim/[token]` page** (`src/app/claim/[token]/page.tsx`) — now
+  purely a preview: shows merchant/total/items and, if claimable, renders
+  `<ClaimButton>`. **`ClaimButton.tsx`** (new, `"use client"`) submits a
+  form bound to a Server Action (**`actions.ts`**'s `claimReceipt`, new)
+  via `useActionState`, so the claim result (success with receipt detail,
+  or an error state) renders in place without a page navigation — this
+  also sidesteps a real correctness gap a GET-based redirect-after-POST
+  approach would've had: reloading the same URL after *your own*
+  successful claim would otherwise be indistinguishable from seeing
+  someone else's already-claimed token, since `previewClaim` doesn't
+  track who did the claiming. Next.js validates a Server Action's
+  `Origin` against the deployment's own host before invoking it at all;
+  `claimReceipt` also calls `isSameOriginFromHeaders` explicitly, the
+  same defense-in-depth relationship the POST route has with its own
+  Origin check.
+- **`resolveClaim`'s status-mapping bug fixed**: when the guarded
+  `updateMany` matches zero rows, the previous code always reported
+  `already_claimed`, even though the real cause could be the token
+  expiring in the narrow window between the initial read and the update
+  — a 409 vs. 410 difference that's user-visible. Now re-reads the row in
+  that branch to report the real reason. Not covered by a dedicated test
+  — deterministically forcing that specific microsecond race isn't
+  practical without mocking Prisma's timing, and the fix is small enough
+  to review directly; flagging that honestly rather than claiming test
+  coverage that doesn't exist.
+- **Tests**: `claim/[token]/route.test.ts` split into a `GET` suite (5
+  tests, including one that calls GET twice and asserts `claimedAt`/
+  `ownerId` are still null — the core regression this follow-up exists to
+  prevent) and a `POST` suite (8 tests, the same tenant-isolation
+  coverage Session 3 had, moved from GET to POST). `receipts/route.test.ts`'s
+  claim-then-check-visibility test updated to POST accordingly. 54 tests
+  total (up from 49). `npm run typecheck`, `npm run test`, and
+  `npm run build` all pass.
+- **Manually verified against the live dev server**: repeated `GET`s on
+  an unclaimed token stayed `previewable` with `claimedAt`/`ownerId`
+  still null in the database; `POST` claimed it; a follow-up `GET`
+  correctly reported `409`; the page correctly rendered "Claim this
+  receipt?" before claiming and "Already claimed" after; a forged
+  cross-origin `POST` was rejected with `403`. **Not verified**: an
+  actual browser click on the `<ClaimButton>` itself — Chrome automation
+  can't reach `localhost` in this sandboxed setup, the same known gap
+  IDent's own OAuth click-through hit. The button's Server Action calls
+  the identical `resolveClaim` the POST route uses (verified above), so
+  the underlying claim mechanics are covered either way, but the actual
+  React `useActionState` wiring — form submission, pending/disabled
+  state, error message rendering — has not been exercised in a real
+  browser. Do that click-through with Omar before trusting the UI layer
+  specifically, the same way IDent's Gmail OAuth flow needed a
+  human-in-the-loop check.
+- **Also updated per review**: `ROADMAP.md`'s "Sponsored receipts"
+  section gained a hard constraint (sponsored content must never alter/
+  obscure/mix with actual receipt data; eventual data model keeps it in
+  a separate `ReceiptSponsorship`-style table, not new `Receipt` columns).
+
+This follow-up didn't consume a new session number — it's a same-day fix
+to Session 3's own commit, the same convention IDent used for its
+"session 14.5" PKCE hardening. The progress bar is unaffected (still
+15%, still 3/9 sessions on Phase 1) since no new roadmap ground was
+covered, just a correctness fix to already-claimed scope.
 
 ## Session cadence for Phase 1 — work one per day, in order
 

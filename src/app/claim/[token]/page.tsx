@@ -1,9 +1,10 @@
 import { cookies, headers } from "next/headers";
 import Link from "next/link";
 import { getCurrentUserFromCookies } from "@/lib/auth";
-import { resolveClaim } from "@/lib/claim";
+import { previewClaim } from "@/lib/claim";
 import { formatMinorUnits } from "@/lib/money";
 import { isSameOriginFromHeaders } from "@/lib/origin-check";
+import ClaimButton from "./ClaimButton";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,16 @@ function InfoPage({ title, body }: { title: string; body: string }) {
   );
 }
 
+/**
+ * Read-only preview — this page (a GET) never claims anything itself; it
+ * shows what the token resolves to and, if there's something claimable,
+ * renders <ClaimButton>, whose form POSTs to the claimReceipt Server
+ * Action (./actions.ts). See RECEIPTLESS_STATE.md's Session 3 follow-up:
+ * claiming used to happen on this page's own GET, which meant a link
+ * preview bot, crawler, or browser prefetch could silently consume a
+ * token — HTTP requires GET to stay safe (RFC 9110), so the mutation
+ * moved behind a POST-only action instead.
+ */
 export default async function ClaimPage({
   params,
 }: {
@@ -35,9 +46,8 @@ export default async function ClaimPage({
 
   const cookieStore = await cookies();
   const user = await getCurrentUserFromCookies(cookieStore);
-  const result = await resolveClaim(token, user?.userId ?? null);
 
-  if (result.status === "unauthenticated") {
+  if (!user) {
     return (
       <InfoPage
         title="Sign in to claim this receipt"
@@ -46,7 +56,9 @@ export default async function ClaimPage({
     );
   }
 
-  if (result.status === "not_found") {
+  const preview = await previewClaim(token);
+
+  if (preview.status === "not_found") {
     return (
       <InfoPage
         title="Claim link not found"
@@ -55,7 +67,7 @@ export default async function ClaimPage({
     );
   }
 
-  if (result.status === "expired") {
+  if (preview.status === "expired") {
     return (
       <InfoPage
         title="Claim link expired"
@@ -64,7 +76,7 @@ export default async function ClaimPage({
     );
   }
 
-  if (result.status === "already_claimed") {
+  if (preview.status === "already_claimed") {
     return (
       <main className="flex flex-col items-center gap-3 p-6 text-center">
         <h1 className="text-xl font-semibold">Already claimed</h1>
@@ -80,14 +92,11 @@ export default async function ClaimPage({
     );
   }
 
-  const receipt = result.receipt;
+  const receipt = preview.receipt;
 
   return (
     <main className="flex flex-col items-center gap-4 p-6 max-w-sm mx-auto text-center">
-      <div className="rounded-full bg-emerald-100 text-emerald-700 w-12 h-12 flex items-center justify-center text-2xl">
-        ✓
-      </div>
-      <h1 className="text-xl font-semibold">Receipt claimed</h1>
+      <h1 className="text-xl font-semibold">Claim this receipt?</h1>
       <div className="border rounded p-4 w-full text-left">
         <p className="font-medium">{receipt.merchant.name}</p>
         <p className="text-sm text-neutral-500">
@@ -109,9 +118,7 @@ export default async function ClaimPage({
           </ul>
         )}
       </div>
-      <Link href="/receipts" className="text-sm text-emerald-600 underline">
-        View in your vault →
-      </Link>
+      <ClaimButton token={token} />
     </main>
   );
 }
