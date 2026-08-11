@@ -133,6 +133,12 @@ will.
   a large ingestion-coverage win independent of any merchant partnership
 - Per-retailer parser adapters built on the `parseInlinePayload` seed
 
+This phase is broken into an 8-session, work-one-per-day cadence in
+[RECEIPTLESS_STATE.md](./RECEIPTLESS_STATE.md) — read that for the actual
+build order, dependencies, and what needs Omar's input (provider/account
+choices) vs. what's solo-buildable right now. This bullet list is the
+*what*; RECEIPTLESS_STATE.md is the *in what order, one day at a time*.
+
 ## Phase 2 — Vault maturity (Months 2–3)
 
 - Real search (full-text, eventually semantic) across merchants, items, notes

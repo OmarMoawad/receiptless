@@ -15,6 +15,10 @@ the QR claim-token protocol, merchant API/SDK, receipt authenticity/
 signatures, merchant terminal + payment-authorization integration, native
 apps with platform NFC, and financial intelligence.
 
+See [RECEIPTLESS_STATE.md](./RECEIPTLESS_STATE.md) for exactly what's
+currently done vs. pending, and the session-by-session cadence Phase 1 is
+being built in — read that before writing any code here.
+
 ## Stack
 
 - [Next.js](https://nextjs.org) (App Router) + TypeScript + Tailwind
