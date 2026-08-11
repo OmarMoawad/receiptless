@@ -14,14 +14,6 @@ const SOURCES = [
 const categorySchema = z.enum(CATEGORIES);
 const sourceSchema = z.enum(SOURCES);
 
-// A data: URL image capped well under typical request-body limits — large
-// enough for a phone-camera receipt photo, small enough to bound abuse.
-const imageUrlSchema = z
-  .string()
-  .max(8_000_000)
-  .refine((v) => v.startsWith("data:image/"), "imageUrl must be a data:image/* URL")
-  .optional();
-
 export const receiptItemInputSchema = z.object({
   name: z.string().trim().min(1).max(200),
   sku: z.string().trim().max(100).optional(),
@@ -51,7 +43,10 @@ export const createReceiptSchema = z.object({
   category: categorySchema.default("OTHER"),
   purchasedAt: z.iso.datetime({ offset: true }).or(z.iso.date()),
   source: sourceSchema.default("MANUAL"),
-  imageUrl: imageUrlSchema,
+  // No inline image field here (Session 4, RECEIPTLESS_STATE.md) — a photo
+  // is uploaded separately via POST /api/receipts/[id]/photo once the
+  // receipt exists, so it goes through real object storage from the start
+  // instead of ever touching an inline data: URL.
   rawPayload: z.string().max(10_000).optional(),
   notes: z.string().max(2_000).optional(),
   items: z.array(receiptItemInputSchema).max(200).optional(),

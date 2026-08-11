@@ -18,5 +18,29 @@ services:
       timeout: 5s
       retries: 5
 
+  # Session 4 (RECEIPTLESS_STATE.md): S3-compatible local target for real
+  # object storage — src/lib/storage.ts talks to it via the S3 API (same
+  # client works against real S3/R2 later, purely via env vars). Local dev
+  # only; not used in CI, which runs against an injectable in-memory fake
+  # instead (src/test/fake-object-storage.ts) to avoid depending on a
+  # service container that isn't part of this repo's existing CI setup.
+  minio:
+    image: minio/minio:latest
+    environment:
+      MINIO_ROOT_USER: receiptless
+      MINIO_ROOT_PASSWORD: receiptless-dev-secret
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # web console
+    volumes:
+      - receiptless_minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
 volumes:
   receiptless_db_data:
+  receiptless_minio_data:

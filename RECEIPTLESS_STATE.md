@@ -10,14 +10,15 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-Last updated: 2026-08-11 — **Session 3 follow-up done** (same-day
-hardening after an external review of Session 3's own commit: claim
-attach no longer happens on `GET`, plus an expiry/already-claimed status
-fix — see "Completed components (Session 3 follow-up)" below). Session 3
-itself (scope the vault to a user: `ownerId`, owner-scoped routes, atomic
-claim+attach, tenant-isolation test suite), Session 2 (user accounts),
-and Session 1 (Postgres migration + testing/CI baseline) were all done
-earlier the same day. This file was created earlier still, then
+Last updated: 2026-08-11 — **Session 4 done** (real object storage for
+receipt photos — see "Completed components (Session 4)" below). Session 3
+follow-up (same-day hardening: claim attach no longer happens on `GET`,
+plus an expiry/already-claimed status fix, plus a real-browser
+click-through of the fix with Omar), Session 3 itself (scope the vault to
+a user: `ownerId`, owner-scoped routes, atomic claim+attach,
+tenant-isolation test suite), Session 2 (user accounts), and Session 1
+(Postgres migration + testing/CI baseline) were all done earlier the same
+day. This file was created earlier still, then
 revised after an external review of its initial version (overclaimed
 Phase 0 as "verified" with zero automated tests behind that word, had a
 real contradiction about which session finishes Phase 1's email-ingestion
@@ -31,9 +32,10 @@ session, update it, commit, push.
 ## Current phase
 
 **Phase 1 — Reliable ingestion + accounts** (ROADMAP.md), in progress.
-Sessions 1 (Postgres + testing/CI baseline), 2 (user accounts), and 3
-(vault scoped to a user) are done — see "Completed components" below.
-Phase 0 (canonical foundation) was done before this file existed.
+Sessions 1 (Postgres + testing/CI baseline), 2 (user accounts), 3 (vault
+scoped to a user), and 4 (real object storage for photos) are done — see
+"Completed components" below. Phase 0 (canonical foundation) was done
+before this file existed.
 
 Phase 1 is one paragraph in ROADMAP.md but six real, multi-day pieces of
 work (hosting, accounts, storage, OCR, email ingestion, parser adapters).
@@ -367,6 +369,105 @@ to Session 3's own commit, the same convention IDent used for its
 15%, still 3/9 sessions on Phase 1) since no new roadmap ground was
 covered, just a correctness fix to already-claimed scope.
 
+## Completed components (Session 4 — real object storage for photos)
+
+- **`src/lib/storage.ts`** (new) — an `ObjectStorage` interface
+  (`put`/`getSignedUrl`/`delete`) with an S3-compatible implementation
+  (`s3Storage`) built on the `minio` npm package rather than the official
+  `@aws-sdk/client-s3`: at the time of this session, every recent
+  `@aws-sdk/client-s3` release on the npm registry depended on
+  `@aws-sdk/types@^3.974.3`, a version that didn't exist on the registry
+  (confirmed with a clean install in an isolated temp directory, not
+  specific to this repo — a genuine upstream breakage, not a config
+  issue). `minio` speaks the same S3 API against any S3-compatible
+  endpoint (real AWS S3, R2, or local MinIO), so this isn't a
+  MinIO-only workaround — only `S3_ENDPOINT`/credentials change to point
+  at a real bucket later. Revisit swapping to the official AWS SDK once
+  its registry state is sane again, if there's ever a reason to (no
+  functional gap forcing it).
+- **Never a public URL.** The bucket itself is never public — `Receipt`
+  stores only an `imageKey` (Session 3's schema also gained this
+  session), and `getSignedUrl` hands out a **5-minute presigned URL**
+  on demand, only after an ownership-scoped lookup
+  (`GET /api/receipts/[id]/photo`, below). A leaked or guessed object key
+  alone is never enough to read someone else's receipt image — verified
+  against real MinIO (see "Manually verified" below), not just asserted.
+- **Content-type sniffed from the file's own magic bytes**
+  (`sniffImageContentType`), never trusted from a client-supplied
+  filename or `Content-Type` header — both are attacker-controlled.
+  Accepts JPEG/PNG/WEBP only. **Object keys are unpredictable**
+  (`receiptImageKey`: `receipts/${ownerId}/${24-random-bytes}.${ext}`) and
+  **owner-namespaced from the authenticated session only** — a client can
+  never choose or influence `ownerId` in the key, so there's no way to
+  write into (or, combined with the point above, read from) another
+  user's namespace.
+- **`POST`/`GET /api/receipts/[id]/photo`** (new route) — both look the
+  receipt up scoped by `ownerId` first (`prisma.receipt.findFirst({
+  where: { id, ownerId } })`), the same tenant-isolation mechanism
+  Session 3 established for every other receipt-facing route: this is
+  what makes the photo routes isolated too, not anything key-format
+  specific. `POST` enforces `MAX_IMAGE_BYTES` (8MB, matching Phase 0's old
+  `imageUrlSchema` cap), sniffs content type, uploads, then updates
+  `Receipt.imageKey` — wrapped so a DB-write failure after a successful
+  upload deletes the just-uploaded object instead of orphaning it, and a
+  photo *replacing* an existing one deletes the old object once the new
+  one is safely referenced. `GET` 404s if there's no photo yet, otherwise
+  307-redirects to a freshly generated signed URL.
+- **`Receipt.imageUrl` retired, `imageKey` takes its place** (migration
+  `20260811201429_add_receipt_image_key`) — Phase 0's inline
+  `data:image/*` URL storage is gone from `createReceiptSchema` entirely;
+  a photo is now a separate upload after the receipt exists, not part of
+  receipt creation. Safe to drop outright rather than migrate/backfill:
+  the hard gate in this file (no real user data anywhere beyond local
+  dev) means no real inline-image data existed to lose.
+- **Frontend**: `receipts/new/page.tsx` keeps the raw captured `File`
+  instead of base64-encoding it into a data URL; `ReceiptForm.tsx` builds
+  a local `URL.createObjectURL` preview (no server round trip just to
+  show what was captured), creates the receipt first, then uploads the
+  photo as a second `multipart/form-data` request once an id exists. If
+  the photo upload fails, the receipt itself is still saved (already
+  the more important half) and an inline error says so, but there's no
+  retry-upload affordance yet — the copy doesn't claim one.
+- **Test-only injection seam** (`getObjectStorage`/`setObjectStorage` in
+  `storage.ts`, `FakeObjectStorage` in `src/test/fake-object-storage.ts`)
+  — mirrors IDent's `FakeGoogleOAuthClient` pattern from its own session
+  14 (wrap the external API surface behind a small interface so tests get
+  a fake instead of needing the real dependency reachable in CI).
+  Deliberate choice: MinIO is **not** wired into GitHub Actions as a
+  service container — this repo's Postgres service container already
+  sets a precedent that could have extended to MinIO, but doing that
+  blind (no way to dry-run a CI config change before pushing) carried
+  real risk of quietly breaking a CI setup Omar depends on being green,
+  for a dependency this session can test just as rigorously against a
+  fake instead. Real MinIO is still exercised, deliberately, by the
+  manual verification pass below — this isn't skipping real-backend
+  testing, just not routing it through CI.
+- **22 new tests** (76 total, up from 54): `storage.test.ts` (magic-byte
+  sniffing for all three formats plus rejection cases, key format/
+  uniqueness/namespacing) and the photo route's own suite — 401s, 404 on
+  an unknown receipt, **404 on another user's receipt for both `POST` and
+  `GET`** (this session's analogue of Session 3's tenant-isolation gate:
+  "Alice cannot obtain Bob's image even if she knows its id"), successful
+  upload with correct `imageKey`/DB/storage state, rejected non-image
+  payload (and confirms storage was never called), rejected oversized
+  payload, and replace-deletes-the-old-object. `npm run typecheck`,
+  `npm run test`, and `npm run build` all pass.
+- **Manually verified against real MinIO** (`docker compose up minio`,
+  not the fake): registered a user, created a receipt, uploaded a
+  hand-built real PNG via `curl -F`, confirmed the stored `imageKey` and
+  a `GET` producing a genuine `AWS4-HMAC-SHA256`-signed redirect whose
+  target, once fetched, was byte-identical to the uploaded file.
+  Confirmed a second user gets `404` on both `GET` and `POST` against the
+  first user's receipt. Confirmed replacing the photo left the *old*
+  object key genuinely gone from MinIO (`mc stat` against it 404s) while
+  the new one exists. **Not verified**: the `receipts/new` page's own
+  upload UI in a real browser — same Chrome-automation-can't-reach-
+  localhost gap as the claim flow, and API-level correctness is fully
+  proven above the way register/login's UI-less API already sets
+  precedent for in this repo. Offer Omar a click-through of this one too
+  before treating the UI layer specifically as trusted, same discipline
+  as the Session 3 follow-up's `<ClaimButton>` check.
+
 ## Session cadence for Phase 1 — work one per day, in order
 
 Each session is scoped to be buildable, testable, and shippable in roughly
@@ -395,15 +496,13 @@ gaps.
    owner-scoped, atomic claim+attach, Origin/Host check on both claim
    paths, full 10-item tenant-isolation checklist covered by tests.
 
-4. **Real object storage for photos (S3/R2).** Replace the inline
-   `data:image/*` URL storage (Phase 0's deliberate placeholder — see
-   `validation.ts`'s comment on `imageUrlSchema`) with real uploads to
-   S3/R2, storing only the object key/URL on `Receipt`. **Needs Omar**:
-   creating the actual bucket + credentials. Not a blocker for building
-   this session, though — the upload path can be written against env vars
-   and a documented interface, and tested locally against a
-   S3-compatible target (e.g. MinIO in docker-compose) without waiting on
-   a real bucket.
+4. ~~**Real object storage for photos (S3/R2)**~~ — done (see "Completed
+   components (Session 4)" above): `imageKey` on `Receipt`, owner-scoped
+   upload/fetch routes, signed URLs only, content sniffed from magic
+   bytes, tenant-isolation tests, manually verified against real MinIO.
+   **Still needs Omar** for an actual production deployment: a real S3/R2
+   bucket + credentials (local dev/CI use MinIO/a fake, per above) — not
+   a blocker for anything before Session 8's hosting work.
 
 5. **OCR on photo uploads.** Tesseract.js (or a cloud OCR API) run
    against an uploaded photo to suggest merchant/total/items into
@@ -503,10 +602,11 @@ env-gate on top of that before any public deployment.
 
 ## Next task
 
-**Session 4 — Real object storage for photos (S3/R2).** See "Session
-cadence" above for full scope: replace the inline `data:image/*` URL
-storage with real uploads to S3/R2, storing only the object key/URL on
-`Receipt`. **Needs Omar**: creating the actual bucket + credentials — not
-a blocker for starting, since the upload path can be written against env
-vars and tested locally against an S3-compatible target (e.g. MinIO in
-docker-compose) without waiting on a real bucket.
+**Session 5 — OCR on photo uploads.** See "Session cadence" above for
+full scope: run Tesseract.js (or a cloud OCR API) against an uploaded
+photo (Session 4's `imageKey`/storage now exist to build this on) to
+suggest merchant/total/items into `ReceiptForm` — suggestions the user
+confirms, never silently auto-filled and submitted, matching the
+`VerificationLevel` ladder (OCR output stays `UNVERIFIED`/`IMPORTED`,
+never claims `MERCHANT_VERIFIED`). Nothing blocks starting this
+immediately.

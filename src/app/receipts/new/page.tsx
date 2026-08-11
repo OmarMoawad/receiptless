@@ -13,6 +13,7 @@ export default function NewReceiptPage() {
   const [mode, setMode] = useState<Mode>("choose");
   const [initialValues, setInitialValues] =
     useState<Partial<ReceiptFormValues>>();
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
 
   const handleDecode = useCallback(
     (payload: string) => {
@@ -44,15 +45,12 @@ export default function NewReceiptPage() {
   function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setInitialValues({
-        source: "PHOTO",
-        imageUrl: reader.result as string,
-      });
-      setMode("manual");
-    };
-    reader.readAsDataURL(file);
+    // Session 4 (RECEIPTLESS_STATE.md): the raw File is kept as-is and
+    // uploaded to real object storage after the receipt is created
+    // (ReceiptForm), not base64-encoded into an inline data: URL.
+    setPhotoFile(file);
+    setInitialValues({ source: "PHOTO" });
+    setMode("manual");
   }
 
   return (
@@ -91,7 +89,9 @@ export default function NewReceiptPage() {
 
       {mode === "qr" && <QRScanner onDecode={handleDecode} />}
 
-      {mode === "manual" && <ReceiptForm initialValues={initialValues} />}
+      {mode === "manual" && (
+        <ReceiptForm initialValues={initialValues} photoFile={photoFile} />
+      )}
     </main>
   );
 }

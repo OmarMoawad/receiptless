@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CATEGORIES, type CategoryName } from "@/lib/categories";
 import { toMinorUnits } from "@/lib/money";
@@ -12,7 +12,6 @@ export type ReceiptFormValues = {
   category: CategoryName;
   purchasedAt: string;
   source: string;
-  imageUrl?: string;
   rawPayload?: string;
 };
 
@@ -30,8 +29,10 @@ const emptyValues = (
 
 export default function ReceiptForm({
   initialValues,
+  photoFile,
 }: {
   initialValues?: Partial<ReceiptFormValues>;
+  photoFile?: File | null;
 }) {
   const router = useRouter();
   const [values, setValues] = useState<ReceiptFormValues>(
@@ -39,6 +40,19 @@ export default function ReceiptForm({
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Local-only preview — Session 4 (RECEIPTLESS_STATE.md) uploads the file
+  // to real object storage after the receipt is created, so there's no
+  // server round trip just to show the user what they captured.
+  const previewUrl = useMemo(
+    () => (photoFile ? URL.createObjectURL(photoFile) : null),
+    [photoFile]
+  );
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
   function update<K extends keyof ReceiptFormValues>(
     key: K,
@@ -69,16 +83,32 @@ export default function ReceiptForm({
         category: values.category,
         purchasedAt: new Date(values.purchasedAt).toISOString(),
         source: values.source,
-        imageUrl: values.imageUrl,
         rawPayload: values.rawPayload,
       }),
     });
 
-    setSubmitting(false);
     if (!res.ok) {
+      setSubmitting(false);
       setError("Could not save receipt. Try again.");
       return;
     }
+
+    if (photoFile) {
+      const receipt = await res.json();
+      const photoFormData = new FormData();
+      photoFormData.set("file", photoFile);
+      const photoRes = await fetch(`/api/receipts/${receipt.id}/photo`, {
+        method: "POST",
+        body: photoFormData,
+      });
+      if (!photoRes.ok) {
+        setSubmitting(false);
+        setError("Receipt saved, but the photo didn't upload.");
+        return;
+      }
+    }
+
+    setSubmitting(false);
     router.push("/receipts");
     router.refresh();
   }
@@ -143,10 +173,10 @@ export default function ReceiptForm({
         />
       </label>
 
-      {values.imageUrl && (
+      {previewUrl && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={values.imageUrl}
+          src={previewUrl}
           alt="Receipt preview"
           className="rounded border max-h-48 object-contain"
         />

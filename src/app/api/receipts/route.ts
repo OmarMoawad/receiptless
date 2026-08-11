@@ -74,7 +74,6 @@ export async function POST(request: NextRequest) {
       purchasedAt: new Date(data.purchasedAt),
       source: data.source,
       verification: "UNVERIFIED",
-      imageUrl: data.imageUrl,
       rawPayload: data.rawPayload,
       notes: data.notes,
       items: data.items

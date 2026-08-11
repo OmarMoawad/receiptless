@@ -121,7 +121,11 @@ model Receipt {
   claimTokenExpiresAt DateTime?
   claimedAt           DateTime?
 
-  imageUrl   String?
+  // Session 4 (RECEIPTLESS_STATE.md): replaces Phase 0's inline
+  // data:image/* URL storage. Never a public URL — src/lib/storage.ts
+  // only ever hands out short-lived signed URLs, gated by an
+  // ownership-scoped lookup on this Receipt (see /api/receipts/[id]/photo).
+  imageKey   String?
   rawPayload String?
   notes      String?
 
