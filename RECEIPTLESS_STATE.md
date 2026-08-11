@@ -10,24 +10,26 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-Last updated: 2026-08-11 — **Session 1 done** (Postgres migration +
-testing/CI baseline — see "Completed components" below for the full
-writeup). This file was created earlier the same day, then revised after
-an external review of its initial version (overclaimed Phase 0 as
-"verified" with zero automated tests behind that word, had a real
-contradiction about which session finishes Phase 1's email-ingestion
-scope, and two concrete Phase-0 bugs got fixed alongside the doc
-revision). Retroactively logs Phase 0 (ROADMAP.md) as done, and breaks
-Phase 1 into a **session-by-session cadence** (below) instead of one big
-phase-sized task, so receiptless can be worked in daily increments the
-same way IDent's Phase 0B has been — pick up this file, do the next
-session, update it, commit, push.
+Last updated: 2026-08-11 — **Session 2 done** (user accounts: schema +
+register/login — see "Completed components" below for the full writeup).
+Session 1 (Postgres migration + testing/CI baseline) done earlier the
+same day. This file was created earlier still, then revised after an
+external review of its initial version (overclaimed Phase 0 as "verified"
+with zero automated tests behind that word, had a real contradiction
+about which session finishes Phase 1's email-ingestion scope, and two
+concrete Phase-0 bugs got fixed alongside the doc revision).
+Retroactively logs Phase 0 (ROADMAP.md) as done, and breaks Phase 1 into
+a **session-by-session cadence** (below) instead of one big phase-sized
+task, so receiptless can be worked in daily increments the same way
+IDent's Phase 0B has been — pick up this file, do the next session,
+update it, commit, push.
 
 ## Current phase
 
 **Phase 1 — Reliable ingestion + accounts** (ROADMAP.md), in progress.
-Session 1 (Postgres + testing/CI baseline) is done — see "Completed
-components" below. Phase 0 (canonical foundation) was done before this
+Sessions 1 (Postgres + testing/CI baseline) and 2 (user accounts) are
+done — see "Completed components" below. Phase 0 (canonical foundation)
+was done before this
 file existed.
 
 Phase 1 is one paragraph in ROADMAP.md but six real, multi-day pieces of
@@ -41,13 +43,15 @@ how IDent's sessions work, not ROADMAP.md's phase-sized granularity.
 ## Completed components (Phase 0 — manually exercised, not test-verified)
 
 Unlike IDent's own "Completed components," this list is **not** backed by
-an automated test suite yet — receiptless currently has `dev`/`build`/
-`start`/`lint` scripts but no `test` or `typecheck` script and no CI
-workflow. What's below was built and manually/curl-checked, the way
-IDent's own Phase 0A infra was before it grew a real test suite — it's
+an automated test suite — at the end of Phase 0, receiptless had only
+`dev`/`build`/`start`/`lint` scripts, no `test` or `typecheck` script, and
+no CI workflow. What's below was built and manually/curl-checked, the way
+IDent's own Phase 0A infra was before it grew a real test suite — it was
 real, working code, just not held to IDent's later, stronger bar of
-"verified" yet. Session 1 below now explicitly includes closing that gap,
-rather than leaving it implicit.
+"verified." **Session 1 below subsequently closed that gap** — see the
+"Completed components (Session 1 ...)" section further down for the real
+test suite and CI workflow that now exist; this section is a Phase-0-era
+historical record, not a description of the repo's current state.
 
 - `Merchant` / `Receipt` / `ReceiptItem` Prisma schema (`prisma/schema.prisma`)
   — integer minor-unit money throughout (no floats for currency), a
@@ -122,8 +126,17 @@ new work should look like this entry, not like Phase 0's.
   path alias matching `tsconfig.json`), plus `npm run typecheck`,
   `db:generate` (`prisma generate`), and `db:migrate` (`prisma migrate
   deploy`) scripts. `.github/workflows/ci.yml` added, mirroring IDent's
-  own workflow shape (Postgres service container, install → typecheck →
-  generate → migrate → test → build). 16 tests: `src/lib/money.test.ts`
+  own workflow shape (Postgres service container). The step order isn't
+  IDent's own (`install → typecheck → db:migrate → test → build`) — a
+  first push with that order actually failed CI on a clean checkout
+  (`tsc --noEmit` needs `@/generated/prisma/client`, which only
+  `db:generate` produces, and needs Next's own `.next/types`, e.g.
+  `layout.tsx`'s `LayoutProps`, which only `next build` produces — both
+  only "worked" locally because stale generated artifacts were already
+  sitting around from earlier manual runs). Fixed and verified clean by
+  deleting both generated directories locally and rerunning: `install →
+  db:generate → db:migrate → test → build → typecheck`. 16 tests:
+  `src/lib/money.test.ts`
   (minor-unit conversion, including the `0.1 + 0.2` floating-point case
   the whole integer-minor-units design exists to avoid), `POST
   /api/merchant/receipts` (issuance, invalid-JSON and missing-field 400s,
@@ -141,6 +154,47 @@ new work should look like this entry, not like Phase 0's.
   object. `npm run typecheck`, `npm run test`, and `npm run build` all
   pass.
 
+## Completed components (Session 2 — user accounts)
+
+- **New `User`/`Session` Prisma models** (migration
+  `20260811102941_add_users_and_sessions`) — cookie-based sessions, the
+  decision this session's own plan flagged as needing to be made
+  explicitly first: cookie over IDent's bearer-token pattern because
+  receiptless is a same-origin Next.js app (IDent only needed bearer
+  tokens because its apps/web and apps/api are cross-origin). No AMK/
+  vault-key concept — receiptless isn't client-side E2E encrypted (see
+  "Known open decisions" below).
+- **`src/lib/password.ts`** — scrypt password hashing, byte-for-byte the
+  same implementation as IDent's `identity/password.ts` (scrypt's
+  parameters aren't app-specific, no reason for the two copies to
+  diverge): `scrypt$N$r$p$salt$hash` encoding, OWASP's current
+  interactive-login minimum cost.
+- **`src/lib/auth-service.ts`** — `register`/`login`/`logout`/
+  `validateSession`, mirroring IDent's `identity/service.ts` shape
+  exactly, including the timing-safe dummy-hash fallback so "no such
+  user" and "wrong password" cost the same wall-clock time on login.
+- **`src/lib/auth-cookie.ts`** / **`src/lib/auth.ts`** — `HttpOnly`,
+  `SameSite=Lax`, `Secure` in production only (a `Secure` cookie is
+  silently dropped over plain `http://localhost`, which would break local
+  dev). `getCurrentUser(request)` is the one place every future
+  session-gated route (Session 3's owner-scoped receipt routes included)
+  should read the current user from.
+- **Four routes**: `POST /api/auth/register` (201, sets cookie),
+  `POST /api/auth/login` (200, sets a new cookie), `POST /api/auth/logout`
+  (204, revokes the session server-side and clears the cookie),
+  `GET /api/auth/me` (200 or 401).
+- **18 new tests** (34 total): password hashing round-trip/salting/
+  malformed-hash handling, register (success, duplicate-username 409,
+  invalid-username/weak-password 400s), login (success, wrong-password
+  and unknown-username both 401 — same status, timing-safe), logout
+  (revokes so a follow-up `/me` 401s, clears the cookie, succeeds even
+  with no cookie present), `/me` (valid/missing/invalid cookie).
+  `npm run typecheck`, `npm run test`, and `npm run build` all pass.
+  **Also manually verified against the live dev server** (not just
+  vitest): `curl` through register → `/me` with the real `Set-Cookie` →
+  logout → `/me` again correctly 401s — confirms the cookie contract
+  works end to end against real Postgres, not just in-process.
+
 ## Session cadence for Phase 1 — work one per day, in order
 
 Each session is scoped to be buildable, testable, and shippable in roughly
@@ -157,18 +211,12 @@ gaps.
    issuance/resolution/expiry/double-claim, malformed merchant payloads,
    and the money-math helpers.
 
-2. **User accounts: schema + register/login.** New `User` model
-   (id, username or email, password hash, `createdAt`) — no AMK/vault-key
-   concept needed here the way IDent has one, since receiptless isn't
-   client-side E2E encrypted (see "Known open decisions" below for whether
-   that should change later). `POST /api/auth/register`, `POST
-   /api/auth/login`, session issuance. **Open decision to make explicitly
-   before writing code, not improvise mid-session:** cookie-based session
-   (same-origin Next.js app, simpler, more idiomatic here) vs. IDent's
-   bearer-token pattern (only needed there because apps/web and apps/api
-   are cross-origin). Recommend cookie-based for receiptless specifically —
-   confirm before starting. No real UI polish yet, just working
-   register/login forms and tests.
+2. ~~**User accounts: schema + register/login**~~ — done (see "Completed
+   components (Session 2)" above): `User`/`Session` models, cookie-based
+   sessions (the recommended option, confirmed), `POST /api/auth/
+   {register,login,logout}` + `GET /api/auth/me`, 18 tests. No UI yet —
+   these are API-only for now, same as session 1's infra work; register/
+   login forms are UI work for whichever later session needs them.
 
 3. **Scope the vault to a user.** Add `ownerId` to `Receipt` (not to
    `Merchant` — a merchant is shared reference data across users, e.g.
@@ -261,8 +309,8 @@ cadence.
 
 ## Known open decisions
 
-- **Session mechanism**: cookie vs. bearer token (Session 2's call to make
-  explicitly — see above).
+- ~~**Session mechanism**~~ — decided and built in Session 2: cookie-based
+  (`src/lib/auth-cookie.ts`, `HttpOnly`/`SameSite=Lax`/`Secure`-in-prod).
 - **Client-side E2E encryption**: IDent's vault modules are zero-knowledge
   server-side by design (SECURITY.md); receiptless currently is not.
   Receipt data is real financial/purchase history, so this is worth
@@ -287,7 +335,10 @@ env-gate on top of that before any public deployment.
 
 ## Next task
 
-**Session 2 — User accounts: schema + register/login.** See "Session
-cadence" above for full scope, including the cookie-vs-bearer-token
-decision to make explicitly before writing code. Nothing blocks starting
-this immediately.
+**Session 3 — Scope the vault to a user.** See "Session cadence" above
+for full scope: add `ownerId` to `Receipt`, scope every existing
+receipt-facing route by it via `src/lib/auth.ts`'s `getCurrentUser`
+(session 2), and turn the claim-token flow's resolution into the
+account-linking step (atomic transaction: verify session → match unused
+token → assign `ownerId` → set `claimedAt`). Nothing blocks starting this
+immediately.

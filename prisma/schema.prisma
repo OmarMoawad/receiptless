@@ -43,6 +43,36 @@ enum VerificationLevel {
   MERCHANT_VERIFIED
 }
 
+// Session 2 (RECEIPTLESS_STATE.md): username + password accounts,
+// cookie-based sessions — chosen over IDent's bearer-token pattern because
+// this is a same-origin Next.js app (IDent's apps/web and apps/api are
+// cross-origin, which is the only reason it needed bearer tokens at all).
+// No AMK/vault-key concept the way IDent's Identity Core has one —
+// receiptless isn't client-side E2E encrypted (see RECEIPTLESS_STATE.md's
+// "Known open decisions" for whether that should change later).
+model User {
+  id           String    @id @default(cuid())
+  username     String    @unique
+  passwordHash String
+  createdAt    DateTime  @default(now())
+  sessions     Session[]
+}
+
+// Only the sha256 hash of the bearer session-cookie value is stored — the
+// raw value is set on the cookie once, at issuance, and can't be recovered
+// from this table. Same shape as IDent's identity/session.ts convention.
+model Session {
+  id        String    @id @default(cuid())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  tokenHash String    @unique
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  @@index([userId])
+}
+
 model Merchant {
   id        String    @id @default(cuid())
   // Unique by display name for now — a simplification. Real-world merchants

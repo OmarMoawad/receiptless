@@ -98,8 +98,10 @@ the merchant API — see `src/lib/parseReceipt.ts`.
 
 - Receipt photos are currently stored inline as data URLs for MVP simplicity;
   Phase 1 of the roadmap moves this to object storage (S3/R2).
-- There's no multi-user auth yet — every receipt lives in one shared vault.
-  Auth lands in Phase 1.
+- Accounts exist (`POST /api/auth/{register,login,logout}`,
+  `GET /api/auth/me`, cookie-based sessions) but nothing is scoped to a
+  user yet — every receipt still lives in one shared vault regardless of
+  who's logged in. That scoping is its own next step (RECEIPTLESS_STATE.md).
 - `/api/merchant/receipts` is unauthenticated and meant for local/demo use —
   Phase 3 adds real merchant API keys before this is exposed publicly. It
   intentionally marks everything it creates `UNVERIFIED`, not
