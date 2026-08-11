@@ -22,7 +22,8 @@ being built in — read that before writing any code here.
 ## Stack
 
 - [Next.js](https://nextjs.org) (App Router) + TypeScript + Tailwind
-- [Prisma](https://www.prisma.io) + SQLite (dev) via the `better-sqlite3` driver adapter
+- [Prisma](https://www.prisma.io) + Postgres via the `@prisma/adapter-pg` driver adapter
+- [Vitest](https://vitest.dev) for tests, run against a real local Postgres (no mocked DB)
 - [Zod](https://zod.dev) for API input validation
 - [jsQR](https://github.com/cozmo/jsQR) for in-browser QR decoding
 - [Recharts](https://recharts.org) for the spend dashboards
@@ -31,14 +32,23 @@ being built in — read that before writing any code here.
 ## Getting started
 
 ```bash
-npm install
 cp .env.example .env
-npx prisma generate
-npx prisma migrate deploy
+npm install
+docker compose up -d          # starts Postgres on localhost:5433
+npm run db:generate           # generate the Prisma client
+npm run db:migrate            # apply migrations
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
+
+## Checks (same as CI)
+
+```bash
+npm run typecheck
+npm run test
+npm run build
+```
 
 ## Data model
 

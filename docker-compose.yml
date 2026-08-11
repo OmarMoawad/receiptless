@@ -1,0 +1,22 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: receiptless
+      POSTGRES_PASSWORD: receiptless
+      POSTGRES_DB: receiptless
+    ports:
+      # 5433, not Postgres's default 5432 — IDent's own docker-compose.yml
+      # already binds 5432 on the same dev machine, and the two projects
+      # are meant to run side by side, not take turns.
+      - "5433:5432"
+    volumes:
+      - receiptless_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U receiptless"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  receiptless_db_data:

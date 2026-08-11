@@ -10,22 +10,25 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-Last updated: 2026-08-11 — this file created, then revised same-day after
-an external review of the initial version (see "Completed components" and
-"Session cadence" below for what changed and why — short version: the
-initial version overclaimed Phase 0 as "verified" with zero automated
-tests behind that word, had a real contradiction about which session
-finishes Phase 1's email-ingestion scope, and two concrete Phase-0 bugs
-got fixed alongside the doc revision). Retroactively logs Phase 0
-(ROADMAP.md) as done, and breaks Phase 1 into a **session-by-session
-cadence** (below) instead of one big phase-sized task, so receiptless can be
-worked in daily increments the same way IDent's Phase 0B has been — pick up
-this file, do the next session, update it, commit, push.
+Last updated: 2026-08-11 — **Session 1 done** (Postgres migration +
+testing/CI baseline — see "Completed components" below for the full
+writeup). This file was created earlier the same day, then revised after
+an external review of its initial version (overclaimed Phase 0 as
+"verified" with zero automated tests behind that word, had a real
+contradiction about which session finishes Phase 1's email-ingestion
+scope, and two concrete Phase-0 bugs got fixed alongside the doc
+revision). Retroactively logs Phase 0 (ROADMAP.md) as done, and breaks
+Phase 1 into a **session-by-session cadence** (below) instead of one big
+phase-sized task, so receiptless can be worked in daily increments the
+same way IDent's Phase 0B has been — pick up this file, do the next
+session, update it, commit, push.
 
 ## Current phase
 
-**Phase 1 — Reliable ingestion + accounts** (ROADMAP.md), starting now.
-Phase 0 (canonical foundation) is done — see "Completed components" below.
+**Phase 1 — Reliable ingestion + accounts** (ROADMAP.md), in progress.
+Session 1 (Postgres + testing/CI baseline) is done — see "Completed
+components" below. Phase 0 (canonical foundation) was done before this
+file existed.
 
 Phase 1 is one paragraph in ROADMAP.md but six real, multi-day pieces of
 work (hosting, accounts, storage, OCR, email ingestion, parser adapters).
@@ -91,6 +94,53 @@ by the external review mentioned in the header above:
   `Merchant` row gets a `website`, from its own creation payload. Revisit
   once Phase 3 merchant API keys exist.
 
+## Completed components (Session 1 — Postgres migration + testing/CI baseline)
+
+This is the first entry in this file backed by a real, running test suite
+— see the heading above for why Phase 0's own list isn't. From here on,
+new work should look like this entry, not like Phase 0's.
+
+- **Postgres, not SQLite.** `prisma/schema.prisma`'s datasource is now
+  `postgresql`; `src/lib/db.ts` uses `@prisma/adapter-pg` (`pg` +
+  `@prisma/adapter-pg` added, `@prisma/adapter-better-sqlite3` removed).
+  `docker-compose.yml` added, mirroring IDent's exact pattern — one
+  difference: port **5433**, not Postgres's default 5432, since IDent's
+  own `docker-compose.yml` already binds 5432 on the same dev machine and
+  the two projects run side by side. The old SQLite migration history
+  (`prisma/migrations/`, two migrations) was deleted and replaced with one
+  fresh Postgres migration (`20260811091800_init_postgres`) — no schema
+  *shape* change, per Session 1's own scope; local dev data was disposable
+  (gitignored `*.db`) so nothing needed preserving. `db.ts`'s connection
+  fallback matches `docker-compose.yml`'s fixed local-dev credentials
+  exactly, same convention as IDent's `db/pool.ts` — this is what lets
+  `npm run test` work without vitest needing its own `.env` loading.
+  Manually verified against a live container (not just migration success):
+  `POST /api/merchant/receipts` and `GET /api/search` round-tripped real
+  data through Postgres, and the merchant-website fix above was
+  re-confirmed against real Postgres, not just the earlier SQLite-era fix.
+- **Test suite + CI, from zero.** Vitest added (`vitest.config.mts`, `@`
+  path alias matching `tsconfig.json`), plus `npm run typecheck`,
+  `db:generate` (`prisma generate`), and `db:migrate` (`prisma migrate
+  deploy`) scripts. `.github/workflows/ci.yml` added, mirroring IDent's
+  own workflow shape (Postgres service container, install → typecheck →
+  generate → migrate → test → build). 16 tests: `src/lib/money.test.ts`
+  (minor-unit conversion, including the `0.1 + 0.2` floating-point case
+  the whole integer-minor-units design exists to avoid), `POST
+  /api/merchant/receipts` (issuance, invalid-JSON and missing-field 400s,
+  non-integer `totalMinor` rejected, and both merchant-website-fix cases —
+  the overwrite-blocked regression test and the sets-on-create case), and
+  `GET /api/claim/[token]` (resolve, single-use 409 on a second resolution,
+  404 on an unknown token, 410 on an expired one, and a concurrent-claim
+  test proving only one of two simultaneous requests for the same token
+  wins — the atomic-`updateMany` guarantee `src/lib/claim.ts`'s own
+  comment describes, now actually exercised). Route-level tests import the
+  exported `GET`/`POST` handlers directly and call them with a constructed
+  `NextRequest`, in-process against the real dev Postgres — no mocked DB,
+  same philosophy as IDent's `app.inject()`-based tests, adapted to
+  Next.js App Router's handler-function shape instead of Fastify's app
+  object. `npm run typecheck`, `npm run test`, and `npm run build` all
+  pass.
+
 ## Session cadence for Phase 1 — work one per day, in order
 
 Each session is scoped to be buildable, testable, and shippable in roughly
@@ -101,27 +151,11 @@ creation blocking part of them — flagged explicitly rather than guessed at,
 same convention IDent uses for its own hosting-target and click-through
 gaps.
 
-1. **Postgres migration + testing/CI baseline (infra only, no behavior
-   change).** Two infra pieces bundled into one session because they're
-   both prerequisites everything after this depends on, and because
-   shipping a DB swap with zero automated coverage of it is exactly the
-   "verified" overclaim this file got corrected on (see header):
-   - Swap `prisma/schema.prisma`'s `datasource db` from `sqlite` to
-     `postgresql`; add a `docker-compose.yml` for local Postgres, mirroring
-     IDent's exact pattern (`receiptless-db` service, `db:generate`/
-     `db:migrate` npm scripts). Regenerate the Prisma client, run a fresh
-     migration. Zero schema *shape* changes — this is purely the storage
-     swap everything after it assumes.
-   - Add a real test runner (Vitest, matching IDent's stack) and a
-     `typecheck` script; wire up a GitHub Actions workflow mirroring
-     IDent's `.github/workflows/ci.yml` (Postgres service container,
-     `npm install` → typecheck → `db:migrate` → test → build). First tests
-     to write: claim-token issuance/resolution/expiry, double-claim
-     rejection (409), malformed merchant payloads (400 via the existing
-     Zod schemas), and the total/subtotal/tax/discount money-math helpers.
-     This is the floor every later session's own tests build on — from
-     Session 2 onward, "Completed components" entries should read like
-     IDent's (test-backed), not like Phase 0's (manually exercised).
+1. ~~**Postgres migration + testing/CI baseline**~~ — done (see
+   "Completed components" above): Postgres + `docker-compose.yml` (port
+   5433), Vitest + typecheck + CI workflow, 16 tests covering claim-token
+   issuance/resolution/expiry/double-claim, malformed merchant payloads,
+   and the money-math helpers.
 
 2. **User accounts: schema + register/login.** New `User` model
    (id, username or email, password hash, `createdAt`) — no AMK/vault-key
@@ -253,5 +287,7 @@ env-gate on top of that before any public deployment.
 
 ## Next task
 
-**Session 1 — Postgres migration + testing/CI baseline.** See "Session
-cadence" above for full scope. Nothing blocks starting this immediately.
+**Session 2 — User accounts: schema + register/login.** See "Session
+cadence" above for full scope, including the cookie-vs-bearer-token
+decision to make explicitly before writing code. Nothing blocks starting
+this immediately.
