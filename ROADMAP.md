@@ -318,3 +318,22 @@ and pace explicitly once Phase 2 is real and in front of actual users.
 Earlier drafts of this document claimed QR + photo + email receipts would
 cover "90%+" of real-world capture. That number was invented, not measured —
 removed until there's actual usage data to back a claim like that.
+
+## Post-production revisit list
+
+Technical decisions made for pragmatic reasons today, worth re-evaluating
+once circumstances change — not urgent, not blocking anything, logged so
+they don't get silently forgotten:
+
+- **OCR engine: revisit PaddleOCR over Surya once running on
+  better-integrated hardware.** Session 5's OCR feature (`ocr-service/`)
+  runs Surya, not PaddleOCR, purely because PaddleOCR's official pip
+  binaries crashed on the arm64 (Apple Silicon) dev machine this was built
+  on — a native-arm64 segfault and, under emulated amd64, an illegal
+  instruction (see `RECEIPTLESS_STATE.md`'s Session 5 follow-up for the
+  full story). Not a quality judgment: PaddleOCR's own benchmarks
+  (PP-StructureV3's table/layout awareness in particular) are a better fit
+  for receipts' line-item structure than Surya's. Worth trying again on
+  hardware with a properly supported PaddlePaddle build — e.g. an x86_64
+  Linux host/VM (native, not emulated) or once PaddlePaddle's arm64 wheels
+  mature — rather than assuming Surya is the permanent choice.

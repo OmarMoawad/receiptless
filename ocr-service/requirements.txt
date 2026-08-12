@@ -1,0 +1,13 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.20
+surya-ocr==0.6.2
+# Pinned explicitly: surya-ocr==0.6.2 declares only a loose
+# transformers<5.0.0,>=4.41.0 constraint, so an unpinned install resolves
+# to whatever the latest transformers release is — which broke Surya's
+# recognition-model config class (KeyError: 'encoder', inside
+# transformers' own config __repr__/logging path, confirmed 2026-08-12).
+# 4.45.2 was the newest transformers release available before surya-ocr
+# 0.6.2 itself shipped (2024-10-14) — almost certainly what it was
+# actually built/tested against.
+transformers==4.45.2

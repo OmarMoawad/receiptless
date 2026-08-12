@@ -26,12 +26,72 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
 };
 
 // Amount right-aligned at (or near) the end of a line — the common layout
-// for both a receipt's line items and its total/tax/subtotal rows.
-const AMOUNT_AT_END = /([$€£]?)\s?(\d{1,3}(?:[,.]\d{3})*[.,]\d{2})\s*$/;
+// for both a receipt's line items and its total/tax/subtotal rows. A short
+// trailing tail ("T1" tax-category codes, a stray "*", OCR noise) is
+// tolerated after the amount — real scans routinely misread the last
+// couple of characters on a line, and requiring an exact end-of-line match
+// was silently discarding otherwise-good matches on real photos.
+const AMOUNT_AT_END = /([$€£]?)\s?(\d{1,3}(?:[,.]\d{3})*[.,]\d{2})[\s*]{0,3}[A-Za-z0-9%]{0,4}\s*$/;
+
+// Tesseract occasionally drops a decimal point entirely on a low-contrast
+// scan, misreading e.g. "$23.75" as "$23 75" (a plain space where the "."
+// should be) — confirmed on a real total line during Session 5's
+// click-through (2026-08-12). Deliberately narrower than AMOUNT_AT_END:
+// requires an explicit leading currency symbol immediately before the
+// digits, since a bare "<number> <number>" pair with no currency marker
+// is too ambiguous (quantities, phone numbers, dates all look like that)
+// to safely reinterpret as a garbled amount.
+const CURRENCY_SPACE_DECIMAL_AT_END = /[$€£]\s?(\d{1,3})\s+(\d{2})\s*$/;
+
+/** Tries the normal amount shape first, then the space-for-decimal-point repair above. */
+function matchAmountMinor(line: string): number | null {
+  const normal = line.match(AMOUNT_AT_END);
+  if (normal) return parseMoneyToMinor(normal[2]);
+  const repaired = line.match(CURRENCY_SPACE_DECIMAL_AT_END);
+  if (repaired) return parseMoneyToMinor(`${repaired[1]}.${repaired[2]}`);
+  return null;
+}
 
 const TOTAL_LINE = /\btotal\b/i;
+const TOTAL_LINE_FALLBACK = /\bamount\s?due\b/i;
 const NON_TOTAL_TOTAL_LINE = /\b(sub\s?total|pre-?tax)\b/i;
 const SKIP_LINE = /\b(subtotal|sub total|tax|change|cash|card|balance|visa|mastercard|amex|debit|credit|tender|thank you|receipt|date|time)\b/i;
+
+/** Standard iterative Levenshtein distance — short inputs only (word-length strings). */
+function levenshtein(a: string, b: string): number {
+  const rows = a.length + 1;
+  const cols = b.length + 1;
+  const dist = Array.from({ length: rows }, (_, i) => [i, ...Array(cols - 1).fill(0)]);
+  for (let j = 1; j < cols; j++) dist[0][j] = j;
+  for (let i = 1; i < rows; i++) {
+    for (let j = 1; j < cols; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dist[i][j] = Math.min(dist[i - 1][j] + 1, dist[i][j - 1] + 1, dist[i - 1][j - 1] + cost);
+    }
+  }
+  return dist[rows - 1][cols - 1];
+}
+
+/**
+ * Real OCR frequently misreads the word "Total" itself into something an
+ * exact-substring match never catches ("Jotal", "Tote.") — confirmed
+ * against two different real receipts during Session 5's click-through
+ * (2026-08-12), both otherwise reading most of the line correctly. Only
+ * used as a fallback (see guessTotalMinor) after an exact match fails, and
+ * only against words in the typical 3-7 letter range close to "total"'s
+ * own length, to keep the false-positive rate down — an edit distance of 2
+ * still rejects unrelated words like "date" or "cash" but accepts the
+ * observed OCR errors above.
+ */
+function fuzzyMatchesTotal(word: string): boolean {
+  const cleaned = word.toLowerCase().replace(/[^a-z]/g, "");
+  if (cleaned.length < 3 || cleaned.length > 7) return false;
+  return levenshtein(cleaned, "total") <= 2;
+}
+
+function lineFuzzyMatchesTotal(line: string): boolean {
+  return line.split(/\s+/).some(fuzzyMatchesTotal);
+}
 
 /**
  * Converts a matched amount string (e.g. "$12.99", "1,234.56", "12,99")
@@ -56,15 +116,25 @@ function detectCurrency(text: string): string | null {
   return null;
 }
 
+// A merchant name needs at least one real word in it — real OCR output on
+// a noisy/busy receipt photo is full of short junk lines (a stray border
+// character misread as ": E", a lone digit, page-scan artifacts) that
+// would otherwise "win" simply by being first and not amount-shaped.
+// Requiring 2+ consecutive letters filters those out without requiring
+// the line to be clean.
+const LOOKS_LIKE_A_WORD = /[A-Za-z]{2,}/;
+
 /**
- * The first non-empty line that isn't itself a price/date-looking line —
- * real printed receipts put the merchant/store name at the very top, above
- * the address and any items.
+ * The first non-empty, plausibly-a-name line — real printed receipts put
+ * the merchant/store name at the very top, above the address and any
+ * items, but real OCR output on that same region is often the noisiest
+ * part of the scan (small print, sometimes a logo/graphic in the way), so
+ * "first line" alone isn't a safe enough filter on its own.
  */
 function guessMerchant(lines: string[]): string | null {
   for (const line of lines) {
     if (AMOUNT_AT_END.test(line)) continue;
-    if (/^\d+$/.test(line)) continue;
+    if (!LOOKS_LIKE_A_WORD.test(line)) continue;
     return line;
   }
   return null;
@@ -73,14 +143,31 @@ function guessMerchant(lines: string[]): string | null {
 /**
  * Scans bottom-up for a line containing "total" but not "subtotal"/
  * "pre-tax" — the grand total is typically the last such line, printed
- * after (below) any subtotal/tax breakdown.
+ * after (below) any subtotal/tax breakdown. Two fallback tiers, tried in
+ * order, only if the exact match above finds nothing: an "amount due"
+ * line (common on receipts that never print the literal word "total"),
+ * then a fuzzy match on "total" itself (see fuzzyMatchesTotal) — real OCR
+ * scans routinely misread that one word ("Jotal", "Tote.") while reading
+ * the rest of the same line correctly.
  */
 function guessTotalMinor(lines: string[]): number | null {
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
     if (!TOTAL_LINE.test(line) || NON_TOTAL_TOTAL_LINE.test(line)) continue;
-    const match = line.match(AMOUNT_AT_END);
-    if (match) return parseMoneyToMinor(match[2]);
+    const minor = matchAmountMinor(line);
+    if (minor !== null) return minor;
+  }
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!TOTAL_LINE_FALLBACK.test(line)) continue;
+    const minor = matchAmountMinor(line);
+    if (minor !== null) return minor;
+  }
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (NON_TOTAL_TOTAL_LINE.test(line) || !lineFuzzyMatchesTotal(line)) continue;
+    const minor = matchAmountMinor(line);
+    if (minor !== null) return minor;
   }
   return null;
 }
@@ -93,7 +180,9 @@ function guessTotalMinor(lines: string[]): number | null {
 function guessItems(lines: string[]): OcrItemSuggestion[] {
   const items: OcrItemSuggestion[] = [];
   for (const line of lines) {
-    if (SKIP_LINE.test(line) || TOTAL_LINE.test(line)) continue;
+    if (SKIP_LINE.test(line) || TOTAL_LINE.test(line) || TOTAL_LINE_FALLBACK.test(line) || lineFuzzyMatchesTotal(line)) {
+      continue;
+    }
     const match = line.match(AMOUNT_AT_END);
     if (!match) continue;
     const priceMinor = parseMoneyToMinor(match[2]);

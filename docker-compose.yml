@@ -41,6 +41,26 @@ services:
       timeout: 5s
       retries: 5
 
+  # Session 5 follow-up (RECEIPTLESS_STATE.md, 2026-08-12): self-hosted
+  # Surya OCR service — src/lib/ocr-client.ts talks to it over HTTP. Not
+  # used in CI, which runs against an injectable in-memory fake instead
+  # (src/test/fake-ocr-client.ts), same convention as the minio service
+  # above: real OCR is exercised manually against this container, not
+  # wired into the automated test suite. PaddleOCR was tried first
+  # (same day) — dropped after its official binaries crashed under both
+  # native arm64 and emulated amd64 on this machine; Surya is PyTorch-based
+  # and doesn't hit that class of problem, so this runs native arm64.
+  ocr:
+    build: ./ocr-service
+    ports:
+      - "8868:8868"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8868/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s # model loading at startup can take a while on first boot
+
 volumes:
   receiptless_db_data:
   receiptless_minio_data:

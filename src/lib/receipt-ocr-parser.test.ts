@@ -82,4 +82,93 @@ describe("parseReceiptText", () => {
     expect(result.totalMinor).toBeNull();
     expect(result.items).toEqual([]);
   });
+
+  it("falls back to an 'amount due' line when no line says 'total' at all", () => {
+    const text = ["Shop", "Widget                  9.99", "Amount Due               9.99"].join("\n");
+    const result = parseReceiptText(text);
+    expect(result.totalMinor).toBe(999);
+  });
+
+  // Regression test for a real click-through bug (2026-08-12, found by
+  // Omar): a genuine, noisy Tesseract.js scan of a real Kohl's receipt.
+  // guessMerchant previously had no quality filter beyond "not an amount,
+  // not pure digits" — the first line here, a stray OCR-misread border
+  // character, passed both checks and was returned as the merchant
+  // verbatim (": E"). Also exercises the AMOUNT_AT_END relaxation: the
+  // "MEN'S GIFTS" line has a trailing tax-category code ("T1") after the
+  // price, which the original strict end-of-line match silently dropped
+  // (items came back empty). Not every noisy line recovers — the SEAS
+  // SPORTS TOY line has an extra stray OCR glyph after its own "T1" that
+  // still breaks the match, and the true grand total is genuinely
+  // ambiguous in this scan (no line unambiguously pairs "total"/"amount
+  // due" with the actual charged amount) — both accepted as honest
+  // limitations of heuristic parsing, not bugs to chase further today.
+  it("doesn't return OCR noise as the merchant on a real, messy receipt scan", () => {
+    const text = [
+      ": E",
+      "3 Lisbon E",
+      "i Lisbon, CT 63510 i",
+      "4 (860) 376-7770 Rs",
+      "2 ho",
+      "5 09-18-14 2:28P 0471/0027/0401/0 1339%XXX 2",
+      "ID# 999-9081-8585-7148-9528-7295-9855 je",
+      "8 13",
+      "| MEN'S GIFTS 017149538349 G 4.00 T1",
+      "g ItemPrice 40.00 YouSave 36.00 b",
+      "{| SEAS SPORTS TOY 083568050007 * 6.49 T1 ©",
+      ": ItemPrice 12.99 YouSave 6.50 i;",
+      "x SUBTOTAL 10.49 =",
+      "5 KOHL'S CASH 169770002499411 10.00- fe",
+      "A **REMAINING BALANCE 0.00 ¥",
+      "i T1= 0.49 @ 6.35% TAX 0.03 5",
+    ].join("\n");
+
+    const result = parseReceiptText(text);
+    expect(result.merchant).not.toBe(": E");
+    expect(result.merchant).toMatch(/[A-Za-z]{2,}/);
+    expect(result.items.map((i) => i.priceMinor)).toContain(400); // MEN'S GIFTS, "... 4.00 T1"
+  });
+
+  it("finds the total when OCR misreads the word 'Total' itself (e.g. 'Jotal')", () => {
+    const text = ["Shop", "Widget                  9.99", "Jotal                   9.99"].join("\n");
+    expect(parseReceiptText(text).totalMinor).toBe(999);
+  });
+
+  it("doesn't fuzzy-match unrelated short words as 'total'", () => {
+    const text = ["Shop", "Cash                     9.99"].join("\n");
+    expect(parseReceiptText(text).totalMinor).toBeNull();
+  });
+
+  it("repairs a total where OCR dropped the decimal point (a currency symbol confirms it's an amount)", () => {
+    const text = ["Shop", "Widget                  9.99", "Total                   $23 75"].join("\n");
+    expect(parseReceiptText(text).totalMinor).toBe(2375);
+  });
+
+  // Regression test for a second real click-through find (2026-08-12,
+  // found by Omar): a real, noisy scan of a Brioche Doré receipt. Two
+  // compounding OCR failures on the same physical total line ("Tote. $23
+  // 75"): the word "Total" itself got misread ("Tote.", handled by the
+  // fuzzy-match fallback above) *and* the decimal point was dropped
+  // entirely (handled by the space-repair fallback above) — without both
+  // fixes together, an earlier, unrelated line ("Jotal 1.23 $2.00", itself
+  // an OCR-garbled fragment, not the real subtotal/total) would win
+  // instead and silently produce a plausible-looking but wrong total.
+  it("recovers the correct total from a real receipt with both a garbled 'Total' word and a dropped decimal point", () => {
+    const text = [
+      "Brioche",
+      "doree",
+      "Customer Copy",
+      "Latte $7.00",
+      "Crojssane 2 $7.00",
+      "Jotal 1.23 $2.00",
+      "Ix 1.23 | 823. 45",
+      "Subtora; / pe",
+      "Tote. $23 75",
+      "Rounding Adjustmens / soo",
+    ].join("\n");
+
+    const result = parseReceiptText(text);
+    expect(result.merchant).toBe("Brioche");
+    expect(result.totalMinor).toBe(2375);
+  });
 });

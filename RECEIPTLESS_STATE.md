@@ -10,9 +10,20 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-Last updated: 2026-08-12 — **Session 5 done** (OCR on photo uploads — see
-"Completed components (Session 5)" below). Session 4 (real object storage
-for receipt photos — see "Completed components (Session 4)" below). Session 3
+Last updated: 2026-08-12 — **Session 5 follow-up, same day: real-browser
+click-through with Omar found real bugs, then a real architecture
+change** (see "Completed components (Session 5 follow-up)" below). The
+click-through found three genuine parser bugs (all fixed) and confirmed a
+real ceiling: Tesseract.js's own character-recognition accuracy on old/
+faded receipts. That prompted swapping the OCR engine entirely — from
+client-side Tesseract.js to a self-hosted PaddleOCR service (the strongest
+fully open-source OCR available per a benchmark check that day), which
+also moved OCR from browser-side to a new server route. Session 5 itself
+(OCR on photo uploads, original version — see "Completed components
+(Session 5)" below) is superseded by the follow-up in every way that
+matters (the engine changed) except the parser it feeds, which is
+unchanged. Session 4 (real object storage for receipt photos — see
+"Completed components (Session 4)" below). Session 3
 follow-up (same-day hardening: claim attach no longer happens on `GET`,
 plus an expiry/already-claimed status fix, plus a real-browser
 click-through of the fix with Omar), Session 3 itself (scope the vault to
@@ -588,6 +599,185 @@ don't.
   (`vitest run --maxWorkers=2 --testTimeout=20000`). Logged so a future
   session doesn't mistake a loaded machine for a real regression.
 
+## Completed components (Session 5 follow-up — real-browser click-through, then a full OCR engine swap)
+
+Same day (2026-08-12) as Session 5 itself. Omar ran the actual upload
+flow against two of his own real, hard receipts (a 2014 Kohl's receipt —
+old thermal paper, faded unevenly with age/handling — and a Brioche Doré
+receipt), guided step by step (same "Chrome automation can't reach
+localhost in this sandbox" gap every prior click-through here hit). This
+found three genuine bugs in `receipt-ocr-parser.ts`, all fixed and
+regression-tested against the *exact* real OCR text from both receipts:
+
+1. **`guessMerchant` had no quality filter** beyond "not an amount, not
+   pure digits" — a 2-character OCR misread of a border artifact (`": E"`)
+   passed both checks and was returned as the merchant verbatim, just for
+   being the first line. Fixed: requires 2+ consecutive letters
+   (`LOOKS_LIKE_A_WORD`) before a line can be a merchant candidate.
+2. **`AMOUNT_AT_END` required an exact end-of-line match** — real item
+   lines routinely have a short trailing tax-category code after the
+   price (`"... 4.00 T1"`), which silently failed to match, so `items`
+   came back empty on real scans even when merchant/total worked. Fixed:
+   tolerates up to 3 whitespace/`*` chars plus up to 4 trailing alnum
+   chars after the amount.
+3. **Exact keyword matching for "total" missed real OCR errors on that
+   one word** — both receipts had Tesseract misread "Total" itself
+   (`"Jotal"`, `"Tote."`) while reading the rest of the same line
+   correctly, so `totalMinor` came back null (Kohl's) or silently wrong,
+   pulled from an unrelated earlier line (Brioche's `"Jotal 1.23 $2.00"`,
+   not the real total) instead of the actual total line. Fixed two ways,
+   both in `guessTotalMinor`: (a) a length-gated Levenshtein-distance-≤2
+   fuzzy match on "total" as a fallback tier, after the exact match finds
+   nothing; (b) a narrow decimal-point-repair fallback
+   (`CURRENCY_SPACE_DECIMAL_AT_END`) for when OCR drops the `.` entirely
+   (`"$23 75"` → `2375`), requiring an explicit leading currency symbol
+   so it doesn't start reinterpreting unrelated number pairs (dates,
+   quantities) as money. 6 new tests (94 total, up from 88) lock in both
+   real receipts as regression fixtures.
+
+**What the click-through didn't fix, on purpose**: a genuine one-digit
+Tesseract misread (`75` read where the receipt actually printed `45`) on
+the Brioche receipt's total, caught by Omar during review, not by the
+parser. No text-level heuristic can recover a character the OCR engine
+itself read wrong — this is exactly the class of error the amber "please
+review before saving" banner exists for, not a parsing bug. A third test
+photo (a stock "Realistic receipt template" design graphic, confirmed by
+Omar as not a real receipt) surfaced a real but out-of-scope formatting
+gap — one-decimal-digit amounts (`"16.5"` instead of `"16.50"`) aren't
+matched at all — deliberately not chased since the input wasn't
+representative; logged here in case a real receipt ever uses that format.
+
+**Then: swapped the OCR engine from Tesseract.js to a self-hosted service**,
+at Omar's request after the click-through exposed Tesseract's
+character-accuracy ceiling. This is a real architecture change, not a
+drop-in library swap: the strongest fully open-source OCR engines (per a
+benchmark check that day) are Python projects with no browser/WASM
+runtime the way `tesseract.js` has.
+
+- **PaddleOCR tried first** (~94.5% on OmniDocBench vs. Tesseract's ~92%,
+  plus PP-StructureV3's table/layout awareness — relevant for a receipt's
+  line-item structure specifically) — **abandoned after its official pip
+  binaries crashed on this arm64 (Apple Silicon) dev machine under two
+  different architectures**: native arm64 segfaults at import
+  (`Segmentation fault`, exit 139) inside PaddlePaddle's compiled core;
+  forcing `platform: linux/amd64` (Rosetta emulation, pulling PaddlePaddle's
+  more mature x86_64 wheels) instead crashes with `Illegal instruction`
+  (exit 132) the same way. Two different low-level native crashes under two
+  different architectures is a real PaddlePaddle/ARM64 compatibility gap
+  (a documented pain point in that community), not a config mistake worth
+  chasing further — see `git log` around this commit for the abandoned
+  PaddleOCR version of `ocr-service/` if that gap ever gets fixed upstream
+  and this is worth revisiting.
+- **Landed on Surya** instead (`surya-ocr`, PyPI) — PyTorch-based, and
+  PyTorch has much more mature official ARM64 Linux wheels, sidestepping
+  that whole class of problem. Nearly as strong on benchmarks, particularly
+  good layout analysis. Verified its actual Python API (`surya.ocr.run_ocr`
+  plus separate detection/recognition model loaders) directly against the
+  installed package in a throwaway local venv before writing
+  `ocr-service/main.py`, rather than guessing at a fast-moving project's
+  API from memory.
+- **`ocr-service/`** (new): a minimal FastAPI app (`main.py`) wrapping
+  Surya's detection + recognition models behind one `POST /ocr` endpoint,
+  returning newline-joined recognized text — the same "raw OCR text" shape
+  Tesseract.js's `worker.recognize()` used to return, so
+  `receipt-ocr-parser.ts` needed zero changes on the other side of this
+  swap. `Dockerfile` pre-downloads Surya's model weights at build time (not
+  on first request); needs `libgl1`/`libglib2.0-0` (OpenCV/Pillow's
+  transitive chain) in the base image. `docker-compose.yml` gained an `ocr`
+  service (port 8868, health-checked, 60s start period since model loading
+  takes a while on first boot), running native arm64 — same "real service
+  in local dev, faked in tests" convention as `minio`.
+- **`src/lib/ocr-client.ts`** (new): `OcrClient` interface +
+  `SuryaOcrClient` (real, calls the service over HTTP) +
+  `getOcrClient`/`setOcrClient` injection seam — exact same shape as
+  `storage.ts`'s `ObjectStorage`/`getObjectStorage`/`setObjectStorage`.
+  `src/test/fake-ocr-client.ts` mirrors `FakeObjectStorage`.
+- **New `POST /api/receipts/ocr` route**: session-gated (not receipt-
+  ownership-scoped — there's no receipt yet at this point in the flow,
+  same as before; the session check exists so unauthenticated traffic
+  can't burn compute on a real, non-free service), reuses `storage.ts`'s
+  `sniffImageContentType`/`MAX_IMAGE_BYTES` rather than duplicating that
+  validation, returns 502 (not 500) if the OCR service errors/is
+  unreachable — an expected operational state (a separate container that
+  can be down), not a bug in this route. 6 new tests.
+- **`src/lib/ocr.ts`** (rewritten): now a thin `fetch` call to the new
+  route instead of running Tesseract.js in-browser — same
+  `recognizeReceiptText(file): Promise<string>` signature, so
+  `receipts/new/page.tsx` needed zero changes. `tesseract.js` removed
+  from `package.json` (no longer used anywhere).
+- **`OCR_SERVICE_URL`** added to `.env.example` (defaults to
+  `http://localhost:8868`, matching `docker-compose.yml`, same convention
+  as `S3_ENDPOINT` etc.).
+- **94 tests total** (verified with a real `npm run test` run, not
+  computed by hand — see IDent's own session-15 test-count correction for
+  why that discipline matters). `npm run typecheck` and `npm run test`
+  both pass without the real OCR container running (the fake client
+  covers all automated tests, same as MinIO).
+
+**Two more real problems building Surya's image, both fixed**:
+
+1. **Plain `pip install torch` pulls the CUDA build by default on Linux**
+   — several hundred MB to multiple GB of NVIDIA runtime libraries
+   (`nvidia-cufft` alone was 214MB) a CPU-only container never uses,
+   ballooning one build past 16 minutes before it was killed. Fixed:
+   `Dockerfile` installs `torch<3.0.0` from PyTorch's own CPU wheel index
+   (`--index-url https://download.pytorch.org/whl/cpu`, ~92MB) *before*
+   `requirements.txt`, so surya-ocr's own `torch` dependency is already
+   satisfied and pip never reaches for the CUDA variant.
+2. **`surya-ocr==0.6.2` declares only `transformers<5.0.0,>=4.41.0`** — a
+   loose enough range that an unpinned install resolved to whatever the
+   latest `transformers` release currently is, which broke Surya's
+   recognition-model config class (`KeyError: 'encoder'`, inside
+   `transformers`' own config `__repr__`/logging path — a real version-
+   drift incompatibility, not an environment issue). Fixed: pinned
+   `transformers==4.45.2` in `requirements.txt` — the newest release that
+   existed before `surya-ocr==0.6.2` itself shipped (2024-10-14, checked
+   directly against PyPI's release metadata rather than guessed), almost
+   certainly what it was actually built/tested against.
+
+**A third, more serious bug found only by real end-to-end testing (not
+unit tests) — real receipts don't round-trip through Surya the way they
+did through Tesseract.js.** Sent a synthetic test receipt image
+(`CORNER BAKERY` / `Croissant   4.50` / `Latte   5.25` / `Total   9.75`,
+generated locally, not from a real photo) directly to the running `ocr`
+container: Surya's own `text_lines` output split same-row text into
+*separate* detected spans with no relationship to which row they came
+from — `"CORNER BAKERY\nCroissant \n4.50\n5.25\nLatte\n9.75\nTotal"` —
+completely unlike Tesseract's raster-order text, which happened to keep
+"item name ... price" together on one line. Run through
+`receipt-ocr-parser.ts` unchanged, this produced `totalMinor: null,
+items: []` — the swap would have silently broken the feature's actual
+suggestions while every automated test (all mocking the OCR client)
+stayed green. Fixed in `ocr-service/main.py`, not the parser: each
+`TextLine` carries its own bounding box (`.bbox`, unavailable from
+Tesseract.js) — `group_into_rows` greedily clusters spans by vertical
+(Y) overlap into rows, sorts each row's spans left-to-right, and joins
+them with generous spacing, reconstructing the same "name    price"
+layout the parser already expects. Re-tested against the same synthetic
+receipt after the fix: `"CORNER BAKERY\nCroissant     4.50\nLatte
+5.25\nTotal    9.75"` → `parseReceiptText` correctly returns `{merchant:
+"CORNER BAKERY", totalMinor: 975, items: [{Croissant, 450}, {Latte,
+525}]}`.
+- **`Dockerfile` reordered** so `COPY main.py` happens *after* the model-
+  preload `RUN` step, not before — that `RUN` command doesn't depend on
+  `main.py` at all (only imports from `surya`), so the original order was
+  invalidating and re-running the expensive model-download layer on every
+  `main.py` edit. One-time cost to reorder (broke that layer's cache
+  once); every iteration on `main.py` since has been fast.
+- **Real end-to-end verification, done**: built and started the actual
+  `ocr` container (arm64 native, no emulation needed), confirmed
+  `/health` returns 200, sent the synthetic receipt directly to the
+  container's own `/ocr` endpoint (bypassing Next.js) and separately
+  through the real running dev server's actual
+  `POST /api/receipts/ocr` route with a real registered session
+  (bypassing the OCR-client fake entirely) — both paths returned the
+  same correct, row-reconstructed text, which `receipt-ocr-parser.ts`
+  turned into the correct suggestion. This is real, not the fake-client
+  coverage the 94 automated tests provide. **Not yet click-through-
+  verified by Omar against a real receipt photo through the actual
+  browser UI** — worth doing before the next public deploy, same as
+  Session 5's original Tesseract.js version was flagged for.
+
 ## Session cadence for Phase 1 — work one per day, in order
 
 Each session is scoped to be buildable, testable, and shippable in roughly
@@ -728,16 +918,27 @@ env-gate on top of that before any public deployment.
 
 ## Next task
 
-**Session 6 — Email ingestion, path A: forward-to address.** See "Session
-cadence" above for full scope: a per-user forward-to address plus a
-webhook that receives inbound mail and parses it into a `Receipt` at
-`VerificationLevel.IMPORTED`. **Needs Omar**: owning a domain and picking
-an inbound-email provider (SendGrid Inbound Parse, Postmark, Mailgun,
-Cloudflare Email Routing) — flag this and get his choice before writing
-provider-specific code; build the webhook handler against a documented
-payload contract so the provider choice stays swappable either way.
-Before starting, worth a quick real-browser click-through of Session 5's
-OCR flow with Omar (pick a real receipt photo, confirm the suggestion
-banner and prefilled fields look right) — logged as not yet done in
-"Completed components (Session 5)" above, and cheap to close out first
-since Session 5's own code is otherwise finished and tested.
+**A real-browser click-through of the *new* Surya-based OCR flow with
+Omar, through the actual UI** — the Tesseract.js version was already
+click-through-verified against two of Omar's own real (hard, old/faded)
+receipts, which is exactly what surfaced the character-accuracy ceiling
+that led to swapping the engine entirely (see "Completed components
+(Session 5 follow-up)" above). The new Surya-based service has been
+verified end-to-end (`ocr` container health, direct `/ocr` calls, the
+real `POST /api/receipts/ocr` route with a real session) against a
+synthetic test image, and one real, serious bug (Surya splitting same-row
+item name/price into separate lines) was already found and fixed this
+way — but nobody has yet picked a real photo through `/receipts/new`'s
+actual "Upload photo" button and watched the suggestion banner render.
+Cheap to close out, and the natural gate before trusting this for
+Session 6.
+
+**Then: Session 6 — Email ingestion, path A: forward-to address.** See
+"Session cadence" above for full scope: a per-user forward-to address
+plus a webhook that receives inbound mail and parses it into a `Receipt`
+at `VerificationLevel.IMPORTED`. **Needs Omar**: owning a domain and
+picking an inbound-email provider (SendGrid Inbound Parse, Postmark,
+Mailgun, Cloudflare Email Routing) — flag this and get his choice before
+writing provider-specific code; build the webhook handler against a
+documented payload contract so the provider choice stays swappable
+either way.
