@@ -10,8 +10,9 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-Last updated: 2026-08-11 — **Session 4 done** (real object storage for
-receipt photos — see "Completed components (Session 4)" below). Session 3
+Last updated: 2026-08-12 — **Session 5 done** (OCR on photo uploads — see
+"Completed components (Session 5)" below). Session 4 (real object storage
+for receipt photos — see "Completed components (Session 4)" below). Session 3
 follow-up (same-day hardening: claim attach no longer happens on `GET`,
 plus an expiry/already-claimed status fix, plus a real-browser
 click-through of the fix with Omar), Session 3 itself (scope the vault to
@@ -33,9 +34,9 @@ session, update it, commit, push.
 
 **Phase 1 — Reliable ingestion + accounts** (ROADMAP.md), in progress.
 Sessions 1 (Postgres + testing/CI baseline), 2 (user accounts), 3 (vault
-scoped to a user), and 4 (real object storage for photos) are done — see
-"Completed components" below. Phase 0 (canonical foundation) was done
-before this file existed.
+scoped to a user), 4 (real object storage for photos), and 5 (OCR on
+photo uploads) are done — see "Completed components" below. Phase 0
+(canonical foundation) was done before this file existed.
 
 Phase 1 is one paragraph in ROADMAP.md but six real, multi-day pieces of
 work (hosting, accounts, storage, OCR, email ingestion, parser adapters).
@@ -514,6 +515,79 @@ don't.
   nothing about Next.js's App Router makes that obvious from the file
   structure alone.
 
+## Completed components (Session 5 — OCR on photo uploads)
+
+- **`src/lib/receipt-ocr-parser.ts`** (new, pure, unit-tested) —
+  `parseReceiptText(rawText: string): OcrReceiptSuggestion` turns raw OCR
+  text into `{merchant, totalMinor, currency, items}` suggestions via
+  heuristics matched to how real printed receipts are laid out: the
+  merchant is the first non-price-looking line; the grand total is found
+  scanning bottom-up for a line containing "total" but not "subtotal"/
+  "pre-tax" (so it isn't shadowed by the subtotal line printed above it);
+  line items are any other line ending in a right-aligned amount, skipping
+  tax/payment/total lines; currency is detected from a `$`/`€`/`£` symbol
+  anywhere in the text. Amount parsing (`parseMoneyToMinor`) treats the
+  *last* `.`/`,` in a matched amount as the decimal separator so both
+  `12.99` and `12,99` (US vs. European receipts) parse correctly, always
+  returning integer minor units — matching the rest of the schema's
+  money-as-integer discipline, never a float.
+- **`src/lib/ocr.ts`** (new, browser-only) — `recognizeReceiptText(file)`
+  wraps `tesseract.js`'s `createWorker("eng")` + `.recognize()`, run
+  entirely client-side against the just-picked `File`, before a receipt
+  exists server-side (there's nothing to authenticate or upload yet at
+  that point in the flow — see `receipts/new/page.tsx` below). Not unit
+  tested, the same convention `QRScanner.tsx`'s `jsQR` usage already
+  established for this repo: a real WASM OCR engine isn't something
+  vitest should run, and the actual heuristic logic it feeds
+  (`receipt-ocr-parser.ts` above) already is.
+- **`receipts/new/page.tsx`**: `handlePhoto` now runs OCR against the
+  picked file (a new `"photo"` loading-state render, "Reading receipt…")
+  before showing the form, then merges only the fields OCR actually found
+  (`merchant`/`amount`/`currency` — omitted, not set to `undefined`, when
+  absent, so `ReceiptForm`'s own `USD` default isn't accidentally
+  clobbered) into `initialValues`. A failed/empty OCR read falls back to a
+  blank manual-entry form with an honest inline message instead of
+  blocking the capture flow — matches the schema's `VerificationLevel`
+  ladder discipline of never fabricating data that wasn't actually read.
+- **`ReceiptForm.tsx`** gained `ocrSuggested`/`ocrError` props: when OCR
+  found something, an amber banner reads "Merchant/amount were
+  auto-detected from your photo — please review before saving" —
+  suggestions the user can freely edit, never silently auto-filled *and*
+  submitted. The receipt is still created through the existing `POST
+  /api/receipts` path unchanged, which has no field for a client to claim
+  a higher verification level — every OCR-assisted receipt lands at the
+  schema's default `VerificationLevel.UNVERIFIED` for free, with zero new
+  code needed to enforce that ladder rule.
+- **`tesseract.js@7.0.0`** added as a dependency (`package.json`) — no
+  cloud OCR API, so no third-party account/key Omar would have needed to
+  provision first; the whole OCR step runs offline in the browser.
+- **6 new tests** (`receipt-ocr-parser.test.ts`, all against fixture text
+  strings approximating real OCR output, not real images): merchant/total/
+  items extraction from a plain US-style receipt, `$`-symbol currency
+  detection plus confirming the total line itself never also gets read as
+  a line item, European comma-decimal amounts with a `€` symbol, the grand
+  total winning over a same-page subtotal line, and both "no amounts at
+  all" and "empty/whitespace-only" inputs returning honest nulls/empty
+  array rather than guessing. `npm run typecheck`, `npm run test`, and
+  `npm run build` all pass.
+- **No dedicated test for the OCR-triggering UI flow** (`handlePhoto`'s
+  async OCR-then-prefill sequence, or `ReceiptForm`'s new banner) — same
+  gap Session 4's follow-up already logged for this repo's Server
+  Component pages: no frontend test harness exists yet. The parser this
+  flow calls into is fully unit-tested (above); the UI wiring itself was
+  not manually click-through-verified with Omar this session — flagging
+  that honestly rather than claiming a check that didn't happen. Worth a
+  click-through pass before this repo's next public deploy, the same way
+  Session 4's upload UI was.
+- **Full test suite flaked under heavy, unrelated system load while this
+  session ran** (load average briefly above 35 on an 8-core machine, from
+  several stray leftover `tsx watch` processes plus normal desktop apps —
+  nothing to do with this session's code): confirmed by stashing this
+  session's changes and re-running, which also failed the same way at
+  peak load, and by a clean 82/82 pass once concurrency was reduced
+  (`vitest run --maxWorkers=2 --testTimeout=20000`). Logged so a future
+  session doesn't mistake a loaded machine for a real regression.
+
 ## Session cadence for Phase 1 — work one per day, in order
 
 Each session is scoped to be buildable, testable, and shippable in roughly
@@ -550,13 +624,19 @@ gaps.
    bucket + credentials (local dev/CI use MinIO/a fake, per above) — not
    a blocker for anything before Session 8's hosting work.
 
-5. **OCR on photo uploads.** Tesseract.js (or a cloud OCR API) run
-   against an uploaded photo to suggest merchant/total/items into
-   `ReceiptForm` — suggestions the user confirms, never silently
-   auto-filled and submitted, matching the schema's own
-   `VerificationLevel` ladder (OCR output is `UNVERIFIED`/`IMPORTED`, not
-   `MERCHANT_VERIFIED`, and should never claim to be). Tests: parser unit
-   tests against fixture receipt images/text.
+5. ~~**OCR on photo uploads.**~~ — done (see "Completed components
+   (Session 5)" above): client-side Tesseract.js (`src/lib/ocr.ts`)
+   feeding a pure, unit-tested heuristic parser (`src/lib/
+   receipt-ocr-parser.ts`) that suggests merchant/total/currency into
+   `ReceiptForm` via a reviewable amber banner — never silently
+   auto-filled and submitted, and every OCR-assisted receipt still lands
+   at `VerificationLevel.UNVERIFIED` by construction (the create schema
+   has no field for a client to claim otherwise). Item-level suggestions
+   are parsed (`OcrReceiptSuggestion.items`) but not yet wired into the
+   form's UI — `ReceiptForm` only has merchant/amount/currency/category/
+   date fields today, no per-item entry at all; revisit once the form
+   grows one. 6 new tests. **Not yet browser-click-through-verified** —
+   see "Completed components (Session 5)" above.
 
 6. **Email ingestion, path A: forward-to address.** The simplest path
    first, per ROADMAP.md's own note that most digital receipts already
@@ -648,11 +728,16 @@ env-gate on top of that before any public deployment.
 
 ## Next task
 
-**Session 5 — OCR on photo uploads.** See "Session cadence" above for
-full scope: run Tesseract.js (or a cloud OCR API) against an uploaded
-photo (Session 4's `imageKey`/storage now exist to build this on) to
-suggest merchant/total/items into `ReceiptForm` — suggestions the user
-confirms, never silently auto-filled and submitted, matching the
-`VerificationLevel` ladder (OCR output stays `UNVERIFIED`/`IMPORTED`,
-never claims `MERCHANT_VERIFIED`). Nothing blocks starting this
-immediately.
+**Session 6 — Email ingestion, path A: forward-to address.** See "Session
+cadence" above for full scope: a per-user forward-to address plus a
+webhook that receives inbound mail and parses it into a `Receipt` at
+`VerificationLevel.IMPORTED`. **Needs Omar**: owning a domain and picking
+an inbound-email provider (SendGrid Inbound Parse, Postmark, Mailgun,
+Cloudflare Email Routing) — flag this and get his choice before writing
+provider-specific code; build the webhook handler against a documented
+payload contract so the provider choice stays swappable either way.
+Before starting, worth a quick real-browser click-through of Session 5's
+OCR flow with Omar (pick a real receipt photo, confirm the suggestion
+banner and prefilled fields look right) — logged as not yet done in
+"Completed components (Session 5)" above, and cheap to close out first
+since Session 5's own code is otherwise finished and tested.

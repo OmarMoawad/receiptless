@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import QRScanner from "@/components/QRScanner";
 import ReceiptForm, { ReceiptFormValues } from "@/components/ReceiptForm";
 import { extractClaimToken, parseInlinePayload } from "@/lib/parseReceipt";
+import { recognizeReceiptText } from "@/lib/ocr";
+import { parseReceiptText } from "@/lib/receipt-ocr-parser";
 
 type Mode = "choose" | "qr" | "photo" | "manual";
 
@@ -14,6 +16,8 @@ export default function NewReceiptPage() {
   const [initialValues, setInitialValues] =
     useState<Partial<ReceiptFormValues>>();
   const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [ocrSuggested, setOcrSuggested] = useState(false);
+  const [ocrError, setOcrError] = useState<string | null>(null);
 
   const handleDecode = useCallback(
     (payload: string) => {
@@ -42,15 +46,38 @@ export default function NewReceiptPage() {
     [router]
   );
 
-  function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     // Session 4 (RECEIPTLESS_STATE.md): the raw File is kept as-is and
     // uploaded to real object storage after the receipt is created
     // (ReceiptForm), not base64-encoded into an inline data: URL.
     setPhotoFile(file);
-    setInitialValues({ source: "PHOTO" });
-    setMode("manual");
+    setOcrError(null);
+    setOcrSuggested(false);
+    setMode("photo");
+
+    // Session 5: OCR runs client-side, against the picked file, before the
+    // receipt exists server-side — its output only ever prefills the form
+    // below (never auto-submitted), so a failure here just falls back to a
+    // blank manual entry instead of blocking the capture flow.
+    try {
+      const text = await recognizeReceiptText(file);
+      const suggestion = parseReceiptText(text);
+      const suggested: Partial<ReceiptFormValues> = { source: "PHOTO" };
+      if (suggestion.merchant) suggested.merchant = suggestion.merchant;
+      if (suggestion.totalMinor !== null) {
+        suggested.amount = (suggestion.totalMinor / 100).toFixed(2);
+      }
+      if (suggestion.currency) suggested.currency = suggestion.currency;
+      setInitialValues(suggested);
+      setOcrSuggested(Boolean(suggestion.merchant || suggestion.totalMinor !== null));
+    } catch {
+      setInitialValues({ source: "PHOTO" });
+      setOcrError("Could not read this photo automatically — fill in the details below.");
+    } finally {
+      setMode("manual");
+    }
   }
 
   return (
@@ -89,8 +116,17 @@ export default function NewReceiptPage() {
 
       {mode === "qr" && <QRScanner onDecode={handleDecode} />}
 
+      {mode === "photo" && (
+        <p className="text-sm text-neutral-500">Reading receipt…</p>
+      )}
+
       {mode === "manual" && (
-        <ReceiptForm initialValues={initialValues} photoFile={photoFile} />
+        <ReceiptForm
+          initialValues={initialValues}
+          photoFile={photoFile}
+          ocrSuggested={ocrSuggested}
+          ocrError={ocrError}
+        />
       )}
     </main>
   );

@@ -30,9 +30,19 @@ const emptyValues = (
 export default function ReceiptForm({
   initialValues,
   photoFile,
+  ocrSuggested,
+  ocrError,
 }: {
   initialValues?: Partial<ReceiptFormValues>;
   photoFile?: File | null;
+  // Session 5 (RECEIPTLESS_STATE.md): true when merchant/amount/currency
+  // below were guessed from OCR on the captured photo, not typed by the
+  // user — shown as a reminder to review before saving, never used to
+  // change what gets submitted (the form still only sends whatever's
+  // currently in `values`, edited or not, at VerificationLevel.UNVERIFIED
+  // either way).
+  ocrSuggested?: boolean;
+  ocrError?: string | null;
 }) {
   const router = useRouter();
   const [values, setValues] = useState<ReceiptFormValues>(
@@ -115,6 +125,17 @@ export default function ReceiptForm({
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4 w-full max-w-sm">
+      {ocrSuggested && (
+        <p className="text-sm rounded border border-amber-400 bg-amber-50 dark:bg-amber-950 px-3 py-2">
+          Merchant/amount were auto-detected from your photo — please review before saving.
+        </p>
+      )}
+      {ocrError && (
+        <p className="text-sm rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-neutral-500">
+          {ocrError}
+        </p>
+      )}
+
       <label className="flex flex-col gap-1 text-sm">
         Merchant
         <input
