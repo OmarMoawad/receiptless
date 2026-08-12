@@ -54,7 +54,11 @@ function matchAmountMinor(line: string): number | null {
 
 const TOTAL_LINE = /\btotal\b/i;
 const TOTAL_LINE_FALLBACK = /\bamount\s?due\b/i;
-const NON_TOTAL_TOTAL_LINE = /\b(sub\s?total|pre-?tax)\b/i;
+// "Total Saved"/"You Saved" lines are a discount summary, not the amount
+// charged — confirmed on a real receipt where "TOTAL SAVED: $52.50"
+// printed *after* the real "TOTAL $0.52" line, so the bottom-up scan in
+// guessTotalMinor picked the wrong one before this exclusion existed.
+const NON_TOTAL_TOTAL_LINE = /\b(sub\s?total|pre-?tax|total\s+saved|you\s+saved|total\s+savings)\b/i;
 const SKIP_LINE = /\b(subtotal|sub total|tax|change|cash|card|balance|visa|mastercard|amex|debit|credit|tender|thank you|receipt|date|time)\b/i;
 
 /** Standard iterative Levenshtein distance — short inputs only (word-length strings). */

@@ -773,10 +773,33 @@ receipt after the fix: `"CORNER BAKERY\nCroissant     4.50\nLatte
   (bypassing the OCR-client fake entirely) — both paths returned the
   same correct, row-reconstructed text, which `receipt-ocr-parser.ts`
   turned into the correct suggestion. This is real, not the fake-client
-  coverage the 94 automated tests provide. **Not yet click-through-
-  verified by Omar against a real receipt photo through the actual
-  browser UI** — worth doing before the next public deploy, same as
-  Session 5's original Tesseract.js version was flagged for.
+  coverage the 94 automated tests provide.
+- **Real-browser click-through with Omar, done, same day** — the same
+  Kohl's receipt from Session 5's original click-through, this time
+  through Surya. Two findings:
+  1. **CPU-only inference is genuinely slow**: real requests took 83
+     seconds and 2.6 minutes in the dev server's own logs; a small
+     600×400 synthetic test took 2m37s. No GPU passthrough into the
+     container on this dev machine. The UI's "Reading receipt…" state has
+     no progress indicator, which could read as frozen on a slow request
+     — worth a progress affordance before a real deploy, not fixed this
+     session (flagged here rather than silently left).
+  2. **Surya's actual accuracy on this exact receipt was dramatically
+     better than Tesseract's** — recognized `"TOTAL    $0.52"` cleanly,
+     something Tesseract never read as a whole word. But this surfaced a
+     real parser bug, not an OCR one: the same receipt separately prints
+     `"TOTAL SAVED: $52.50"` (a promotional discount-summary line) *after*
+     the real total, and `TOTAL_LINE`'s bare `/\btotal\b/i` match didn't
+     distinguish the two — the bottom-up scan in `guessTotalMinor` found
+     "TOTAL SAVED" first and returned `$52.50` instead of the actual
+     `$0.52` charged. Fixed: `NON_TOTAL_TOTAL_LINE` now also excludes
+     "total saved"/"you saved"/"total savings" lines, same convention as
+     its existing "subtotal"/"pre-tax" exclusions. One new regression test
+     (95 total) against the exact real Surya output. Merchant still comes
+     back as `"Lisbon"` (the town, not "Kohl's") — unchanged, not a bug:
+     this specific receipt's OCR text genuinely never prints the brand
+     name as its first line (confirmed both under Tesseract and Surya),
+     a "first-line heuristic" limitation, not an OCR-quality one.
 
 ## Session cadence for Phase 1 — work one per day, in order
 
@@ -918,25 +941,23 @@ env-gate on top of that before any public deployment.
 
 ## Next task
 
-**A real-browser click-through of the *new* Surya-based OCR flow with
-Omar, through the actual UI** — the Tesseract.js version was already
-click-through-verified against two of Omar's own real (hard, old/faded)
-receipts, which is exactly what surfaced the character-accuracy ceiling
-that led to swapping the engine entirely (see "Completed components
-(Session 5 follow-up)" above). The new Surya-based service has been
-verified end-to-end (`ocr` container health, direct `/ocr` calls, the
-real `POST /api/receipts/ocr` route with a real session) against a
-synthetic test image, and one real, serious bug (Surya splitting same-row
-item name/price into separate lines) was already found and fixed this
-way — but nobody has yet picked a real photo through `/receipts/new`'s
-actual "Upload photo" button and watched the suggestion banner render.
-Cheap to close out, and the natural gate before trusting this for
-Session 6.
+**Session 6 — Email ingestion, path A: forward-to address.** The
+real-browser click-through of the Surya-based OCR flow (see "Completed
+components (Session 5 follow-up)" above) is now done — Surya's own
+accuracy on Omar's real Kohl's receipt was confirmed dramatically better
+than Tesseract's, and the one real bug it found (a "Total Saved"
+discount line beating the real total) is fixed and regression-tested.
+Two things worth keeping in mind before a real deploy, not blocking
+Session 6: OCR requests take 1-3 minutes on this machine's CPU-only
+inference with no progress indicator in the UI, and the merchant-name
+heuristic still gets fooled by receipts that don't print the brand name
+as their literal first line (a "first-line" heuristic limit, not an OCR
+one).
 
-**Then: Session 6 — Email ingestion, path A: forward-to address.** See
-"Session cadence" above for full scope: a per-user forward-to address
-plus a webhook that receives inbound mail and parses it into a `Receipt`
-at `VerificationLevel.IMPORTED`. **Needs Omar**: owning a domain and
+See "Session cadence" above for Session 6's full scope: a per-user
+forward-to address plus a webhook that receives inbound mail and parses
+it into a `Receipt` at `VerificationLevel.IMPORTED`. **Needs Omar**:
+owning a domain and
 picking an inbound-email provider (SendGrid Inbound Parse, Postmark,
 Mailgun, Cloudflare Email Routing) — flag this and get his choice before
 writing provider-specific code; build the webhook handler against a

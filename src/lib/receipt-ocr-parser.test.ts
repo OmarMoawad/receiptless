@@ -171,4 +171,30 @@ describe("parseReceiptText", () => {
     expect(result.merchant).toBe("Brioche");
     expect(result.totalMinor).toBe(2375);
   });
+
+  // Regression test for a real click-through bug (2026-08-12, found by
+  // Omar, against the *same* Kohl's receipt as the merchant-noise test
+  // above — but this time read by Surya, whose real-world accuracy on
+  // this receipt was dramatically better than Tesseract's: it recognized
+  // "TOTAL    $0.52" cleanly. The remaining bug was in the parser, not
+  // the OCR: this receipt separately prints "TOTAL SAVED: $52.50" (a
+  // promotional discount summary) *after* the real total line, and
+  // TOTAL_LINE's bare /\btotal\b/i match doesn't distinguish the two —
+  // the bottom-up scan in guessTotalMinor found "TOTAL SAVED" first and
+  // returned $52.50 instead of the actual $0.52 charged.
+  it("doesn't mistake a 'Total Saved' discount-summary line for the real total", () => {
+    const text = [
+      "Lisbon",
+      "Lisbon, CT 63510",
+      "MEN'S CAFTS    017149538349 G    4.00 T1",
+      "SUBTOTAL    10.49",
+      "** REMAINING BALANCE    0.00",
+      "TOTAL    $0.52",
+      "CASH    0.52",
+      "TOTAL SAVED: $52.50",
+      "THANK YOU FOR SHOPPING AT KOHL'S",
+    ].join("\n");
+
+    expect(parseReceiptText(text).totalMinor).toBe(52);
+  });
 });
