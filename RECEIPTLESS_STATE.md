@@ -16,9 +16,12 @@ change** (see "Completed components (Session 5 follow-up)" below). The
 click-through found three genuine parser bugs (all fixed) and confirmed a
 real ceiling: Tesseract.js's own character-recognition accuracy on old/
 faded receipts. That prompted swapping the OCR engine entirely — from
-client-side Tesseract.js to a self-hosted PaddleOCR service (the strongest
-fully open-source OCR available per a benchmark check that day), which
-also moved OCR from browser-side to a new server route. Session 5 itself
+client-side Tesseract.js to a self-hosted Surya OCR service (PaddleOCR
+was tried first, same day, benchmarked as the strongest fully
+open-source option — abandoned after its official binaries crashed on
+this dev machine; see "Completed components (Session 5 follow-up)"
+below for the full story), which also moved OCR from browser-side to a
+new server route. Session 5 itself
 (OCR on photo uploads, original version — see "Completed components
 (Session 5)" below) is superseded by the follow-up in every way that
 matters (the engine changed) except the parser it feeds, which is
@@ -676,6 +679,30 @@ runtime the way `tesseract.js` has.
   installed package in a throwaway local venv before writing
   `ocr-service/main.py`, rather than guessing at a fast-moving project's
   API from memory.
+
+  **⚠️ BLOCKING for commercial deployment, found in a 2026-08-12 review,
+  not resolved — needs Omar's explicit decision before this goes anywhere
+  near production.** The `surya-ocr==0.6.2` code itself is Apache-2.0, but
+  the actual **model weights** it downloads and runs
+  (`vikp/surya_det3`, `vikp/surya_rec2` — confirmed directly against
+  HuggingFace's own model-card API, not assumed) are licensed
+  **CC-BY-NC-SA-4.0** — non-commercial, no revenue/funding threshold, no
+  carve-out at all. Receiptless's own ROADMAP.md has a whole "Commercial
+  model" section (retailer API access, premium tiers, sponsors); using
+  these specific weights commercially as currently wired up would violate
+  that license outright. (Note this is stricter than newer `surya-ocr`
+  releases, which moved to a modified OpenRAIL license with a ~$5M
+  funding/revenue threshold — still not simply permissive, but not what
+  this pinned version actually uses either way.) **Nothing has been done
+  about this except documenting it here and in ROADMAP.md's "Post-
+  production revisit list"** — no engine swap, no license negotiation.
+  Fine for local prototyping (nothing is deployed, no real user data
+  flows through it — this repo's own hard gate already blocks that), not
+  fine to build further on without Omar reading this and deciding: accept
+  the NC license for now and swap later, negotiate a commercial license,
+  or move to a permissively-licensed engine (docTR — Apache 2.0 — is the
+  most directly comparable option; see ROADMAP.md) before this goes any
+  further.
 - **`ocr-service/`** (new): a minimal FastAPI app (`main.py`) wrapping
   Surya's detection + recognition models behind one `POST /ocr` endpoint,
   returning newline-joined recognized text — the same "raw OCR text" shape
@@ -800,6 +827,94 @@ receipt after the fix: `"CORNER BAKERY\nCroissant     4.50\nLatte
      this specific receipt's OCR text genuinely never prints the brand
      name as its first line (confirmed both under Tesseract and Surya),
      a "first-line heuristic" limitation, not an OCR-quality one.
+
+**Same-day follow-up: a real review of the Surya swap (2026-08-12) found
+seven issues, six fixed same day, one (the license question above)
+correctly left as a decision for Omar rather than silently worked around:**
+
+1. **The OCR service was reachable from any host on the network, with no
+   auth of its own.** `docker-compose.yml` published port 8868 on
+   `0.0.0.0`; the Python service accepted unauthenticated uploads with no
+   size/concurrency limit — anyone who could reach the machine could
+   bypass `POST /api/receipts/ocr`'s session check entirely and trigger
+   repeated 1-3-minute CPU-bound jobs. Fixed: bound to
+   `127.0.0.1:8868:8868`. **Still not production-safe** — a real
+   deployment needs this on a private network with no public port at
+   all, not just loopback, plus real service-level auth.
+2. **License question — see the Surya bullet above and
+   `ROADMAP.md`'s "Post-production revisit list".** Deliberately not
+   "fixed" — this is Omar's decision, not a bug to patch around.
+3. **No request timeout, and the architecture doesn't fit measured
+   latency.** `ocr-client.ts` had no timeout at all; a hung (not just
+   slow) service would hold the connection open indefinitely, with real
+   requests already measured at 1-3 minutes. Fixed a real bug on the way:
+   `main.py`'s `/ocr` handler awaited Surya's blocking `run_ocr` call
+   directly, which blocked FastAPI's single event loop for the *entire*
+   inference — even `/health` couldn't respond mid-request (confirmed:
+   before the fix, a concurrent `/health` call didn't return until the
+   OCR request finished; after, it returned in 158ms while an OCR request
+   was actively running). Fixed by running inference in a worker thread
+   (`loop.run_in_executor`) behind a concurrency-limiting semaphore, and
+   added a 5-minute hard client-side timeout
+   (`AbortSignal.timeout`) as a backstop. **Still not what a real
+   production deployment needs**: this review's own suggested design
+   (upload → create job → `202` + job id → client polls/SSE for status)
+   is a genuinely different, bigger architecture — synchronous
+   request/response, even non-blocking, still doesn't fit a reverse
+   proxy's or serverless platform's typical request-timeout ceiling.
+   Not built; flagged here for whenever a real deploy target exists.
+4. **The Python service trusted the Next.js route's validation instead
+   of enforcing its own.** Fixed: `main.py` now independently checks
+   request size (matching `storage.ts`'s 8MB `MAX_IMAGE_BYTES`), decoded
+   image format (JPEG/PNG/WEBP only, checked after `Image.open()`, not
+   trusted from any client-supplied header), and a 20-megapixel dimension
+   cap — deliberately tighter than Pillow's own built-in decompression-
+   bomb ceiling (`Image.MAX_IMAGE_PIXELS`, ~178M pixels by default) so an
+   oversized image is rejected cheaply (dimensions are read from the file
+   header, no full decode needed) before the expensive `.convert("RGB")`
+   step ever runs.
+5. **`group_into_rows` (the row-reconstruction fix from earlier in this
+   same session) had zero test coverage**, and writing tests for it
+   surfaced a real bug matching exactly what the review predicted: the
+   original `overlap / min(heightA, heightB)` ratio let an unusually tall
+   span (a rotated barcode fragment, a multi-line detection glitch)
+   trivially "overlap enough" with any short row it merely touched, then
+   drag that row's own Y-range wide enough to spuriously absorb a second,
+   genuinely unrelated row too. Fixed: switched to an overlap-over-*union*
+   (IoU-style) ratio, which stays correct for same-sized spans (verified
+   against the real Kohl's/Brioche/synthetic cases already in the
+   pipeline) while no longer letting a much-taller span bridge two
+   distinct rows. Extracted into its own `ocr-service/row_grouping.py` —
+   zero ML dependencies, so it imports and runs in milliseconds — with 9
+   new pytest tests (`ocr-service/tests/test_row_grouping.py`): shuffled
+   left/right spans, slight vertical misalignment, adjacent rows (both a
+   clean gap and a thin real overlap), the tall-span-bridging regression
+   itself, a denser 5-row stress case, and empty input. Not wired into CI
+   (same convention as the TS side's fake-client tests) — run manually via
+   a local venv (`cd ocr-service && python3 -m venv .venv && source
+   .venv/bin/activate && pip install pytest && python3 -m pytest tests/`).
+6. **Fuzzy "total" matching could produce a plausible-looking false
+   total.** Confirmed directly: `levenshtein("local", "total") == 2`, the
+   same threshold already accepted for real OCR errors like "Jotal" — a
+   line like `"Local 9.99"` could have been mistaken for the total on a
+   receipt with no real total/amount-due line. Fixed: the fuzzy-match
+   fallback tier now also requires a currency symbol on the line — both
+   real cases this fallback exists for (`"Jotal 1.23 $2.00"`,
+   `"Tote. $23 75"`) already have one, so this costs nothing on real
+   input while meaningfully narrowing the false-positive surface. Two new
+   tests (the negative case and a positive control) — **97 tests total**.
+7. **Stale doc/comment references to "PaddleOCR" as the landed engine**
+   (`RECEIPTLESS_STATE.md`'s own header, `fake-ocr-client.ts`) — both
+   corrected to say Surya; historical mentions of PaddleOCR being tried
+   and abandoned were already accurate and left as-is.
+
+All of the above independently re-verified against the real running `ocr`
+container after the fixes (not just the fake-client-backed 97 automated
+tests): rebuilt (instant, thanks to the earlier Dockerfile layer reorder
+— only the changed `.py` files needed recopying), confirmed loopback-only
+binding via `docker port`, confirmed `/health` responds in ~150ms during
+an active OCR request (the event-loop fix), and re-ran a synthetic
+receipt through the full pipeline end to end with a correct result.
 
 ## Session cadence for Phase 1 — work one per day, in order
 

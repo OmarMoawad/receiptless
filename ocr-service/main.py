@@ -10,6 +10,7 @@
 # receipt-ocr-parser.ts on the Next.js side, unchanged by this swap.
 # src/lib/ocr-client.ts is the one caller; nothing else should depend on
 # this service's shape directly.
+import asyncio
 import io
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -19,6 +20,8 @@ from surya.model.detection.model import load_processor as load_det_processor
 from surya.model.recognition.model import load_model as load_rec_model
 from surya.model.recognition.processor import load_processor as load_rec_processor
 from surya.ocr import run_ocr
+
+from row_grouping import Span, group_into_rows
 
 app = FastAPI()
 
@@ -31,73 +34,76 @@ _det_processor = load_det_processor()
 _rec_model = load_rec_model()
 _rec_processor = load_rec_processor()
 
+# Independent validation at this service's own boundary — the Next.js
+# route (POST /api/receipts/ocr) already enforces size/content-type
+# before forwarding here, but this service is a separate process reachable
+# on its own (loopback-only per docker-compose.yml, but still a distinct
+# trust boundary, flagged in a 2026-08-12 review) and shouldn't assume its
+# only caller is that route.
+MAX_REQUEST_BYTES = 8 * 1024 * 1024  # matches src/lib/storage.ts's MAX_IMAGE_BYTES
+# A receipt photo doesn't need to be huge — this is deliberately far below
+# Pillow's own built-in decompression-bomb ceiling (Image.MAX_IMAGE_PIXELS,
+# ~178 million pixels by default), both to fail fast on a hostile/malformed
+# upload and to bound how much memory/CPU one request can force this
+# CPU-only inference service to spend.
+MAX_IMAGE_PIXELS = 20_000_000  # ~20 megapixels, generous for any real photo
+ACCEPTED_FORMATS = {"JPEG", "PNG", "WEBP"}  # matches storage.ts's accepted set
+
+# A single global concurrency limit, not a full job queue — inference is
+# CPU-bound and already slow (1-3 minutes measured on this dev machine,
+# RECEIPTLESS_STATE.md); letting multiple requests run inference
+# simultaneously would just make all of them slower and risk OOM under
+# real memory pressure, not actually parallelize meaningfully on limited
+# CPU cores. Requests queue behind this rather than being rejected. A real
+# production deployment needs more than this (an actual async job queue
+# with a job id/polling contract, not a synchronous held-open HTTP
+# request) — flagged, not built here; see RECEIPTLESS_STATE.md.
+_inference_semaphore = asyncio.Semaphore(1)
+
+# surya's run_ocr is a plain blocking call, not an async one — awaiting it
+# directly (even inside `async with _inference_semaphore`) would block
+# FastAPI's single event loop for the full 1-3 minutes, leaving even
+# /health unable to respond and making the semaphore itself pointless
+# (nothing else can run to reach it while blocked). Running it in a
+# worker thread instead keeps the event loop free.
+def _run_ocr_blocking(image):
+    return run_ocr([image], [["en"]], _det_model, _det_processor, _rec_model, _rec_processor)
+
 
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
 
 
-def group_into_rows(text_lines, y_overlap_ratio=0.5):
-    """
-    Surya's own `text_lines` are individually-detected text spans, not
-    receipt rows — on a real receipt (item name and its right-aligned
-    price separated by a wide gap), Surya returns the name and the price
-    as two *separate* lines, sometimes even out of left-to-right order.
-    Confirmed 2026-08-12 against a synthetic test receipt: the flat
-    newline-joined text broke receipt-ocr-parser.ts entirely (totalMinor
-    null, items empty) because its whole heuristic model assumes "item
-    name ... price" lives on one line, the way Tesseract.js's raster-order
-    text extraction happened to preserve.
-
-    Fixed here, not in the parser: each TextLine's own `.bbox` ([x1, y1,
-    x2, y2]) gives real position data Tesseract.js never exposed. Spans
-    are greedily clustered into rows by vertical (Y) overlap, then each
-    row's spans are sorted left-to-right and joined with generous spacing
-    — reconstructing the same "name    price" layout the parser expects,
-    from data Surya already computed rather than guessing at layout from
-    plain text.
-    """
-    spans = sorted(text_lines, key=lambda tl: tl.bbox[1])  # top Y, ascending
-
-    rows = []  # each: {"y1": float, "y2": float, "spans": [(x1, text)]}
-    for span in spans:
-        x1, y1, x2, y2 = span.bbox
-        placed_row = None
-        for row in rows:
-            overlap = min(y2, row["y2"]) - max(y1, row["y1"])
-            min_height = min(y2 - y1, row["y2"] - row["y1"])
-            if min_height > 0 and overlap / min_height > y_overlap_ratio:
-                placed_row = row
-                break
-        if placed_row is None:
-            rows.append({"y1": y1, "y2": y2, "spans": [(x1, span.text)]})
-        else:
-            placed_row["spans"].append((x1, span.text))
-            placed_row["y1"] = min(placed_row["y1"], y1)
-            placed_row["y2"] = max(placed_row["y2"], y2)
-
-    rows.sort(key=lambda row: row["y1"])
-    lines = []
-    for row in rows:
-        row["spans"].sort(key=lambda s: s[0])  # left X, ascending
-        lines.append("    ".join(text for _, text in row["spans"]))
-    return lines
-
-
 @app.post("/ocr")
 async def recognize(file: UploadFile = File(...)) -> dict:
     raw = await file.read()
+    if len(raw) > MAX_REQUEST_BYTES:
+        raise HTTPException(status_code=413, detail="Image too large")
+
     try:
-        image = Image.open(io.BytesIO(raw)).convert("RGB")
+        image = Image.open(io.BytesIO(raw))
+        image.verify()  # cheap structural check before the real (heavier) load below
+        image = Image.open(io.BytesIO(raw))  # verify() consumes the parser; reopen to actually use it
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Not a readable image") from exc
 
-    predictions = run_ocr([image], [["en"]], _det_model, _det_processor, _rec_model, _rec_processor)
+    if image.format not in ACCEPTED_FORMATS:
+        raise HTTPException(status_code=400, detail="Image must be JPEG, PNG, or WEBP")
+    if image.width * image.height > MAX_IMAGE_PIXELS:
+        raise HTTPException(status_code=400, detail="Image dimensions too large")
 
-    # Row-reconstructed, top-to-bottom text — see group_into_rows for why
+    image = image.convert("RGB")
+
+    async with _inference_semaphore:
+        loop = asyncio.get_running_loop()
+        predictions = await loop.run_in_executor(None, _run_ocr_blocking, image)
+
+    # Row-reconstructed, top-to-bottom text — see row_grouping.py for why
     # Surya's own line ordering isn't usable as-is. This is the same "raw
     # OCR text" contract Tesseract.js's worker.recognize used to return,
     # so receipt-ocr-parser.ts needs zero further changes on the other
     # side of this swap.
-    lines = group_into_rows(predictions[0].text_lines)
+    spans = [Span(line.bbox, line.text) for line in predictions[0].text_lines]
+    lines = group_into_rows(spans)
     return {"text": "\n".join(lines)}

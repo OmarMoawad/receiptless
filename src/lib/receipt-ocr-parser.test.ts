@@ -130,13 +130,29 @@ describe("parseReceiptText", () => {
   });
 
   it("finds the total when OCR misreads the word 'Total' itself (e.g. 'Jotal')", () => {
-    const text = ["Shop", "Widget                  9.99", "Jotal                   9.99"].join("\n");
+    const text = ["Shop", "Widget                  9.99", "Jotal                   $9.99"].join("\n");
     expect(parseReceiptText(text).totalMinor).toBe(999);
   });
 
   it("doesn't fuzzy-match unrelated short words as 'total'", () => {
     const text = ["Shop", "Cash                     9.99"].join("\n");
     expect(parseReceiptText(text).totalMinor).toBeNull();
+  });
+
+  // Regression test for a real review finding (2026-08-12): "local" is
+  // exactly Levenshtein distance 2 from "total", the same threshold the
+  // fuzzy-match fallback already accepts for real OCR errors like "Jotal".
+  // Without a currency-symbol requirement, a line like "Local 9.99" could
+  // have been mistaken for the total on a receipt with no real total/
+  // amount-due line at all.
+  it("doesn't fuzzy-match a word close to 'total' with no currency symbol on the line", () => {
+    const text = ["Shop", "Local                    9.99"].join("\n");
+    expect(parseReceiptText(text).totalMinor).toBeNull();
+  });
+
+  it("still fuzzy-matches a 'total'-like word when a currency symbol is present", () => {
+    const text = ["Shop", "Jotal                    $9.99"].join("\n");
+    expect(parseReceiptText(text).totalMinor).toBe(999);
   });
 
   it("repairs a total where OCR dropped the decimal point (a currency symbol confirms it's an amount)", () => {

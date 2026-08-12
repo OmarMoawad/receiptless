@@ -36,7 +36,7 @@ from surya.model.recognition.model import load_model as load_rec_model; \
 from surya.model.recognition.processor import load_processor as load_rec_processor; \
 load_det_model(); load_det_processor(); load_rec_model(); load_rec_processor()"
 
-COPY main.py .
+COPY main.py row_grouping.py .
 
 EXPOSE 8868
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8868"]

@@ -322,18 +322,32 @@ removed until there's actual usage data to back a claim like that.
 ## Post-production revisit list
 
 Technical decisions made for pragmatic reasons today, worth re-evaluating
-once circumstances change — not urgent, not blocking anything, logged so
-they don't get silently forgotten:
+once circumstances change — logged so they don't get silently forgotten.
+The OCR engine item below is not like the others on this list: it's a
+real blocker for commercial use, not just a "worth revisiting" note — see
+its own flag in `RECEIPTLESS_STATE.md`'s Session 5 follow-up.
 
-- **OCR engine: revisit PaddleOCR over Surya once running on
-  better-integrated hardware.** Session 5's OCR feature (`ocr-service/`)
-  runs Surya, not PaddleOCR, purely because PaddleOCR's official pip
-  binaries crashed on the arm64 (Apple Silicon) dev machine this was built
-  on — a native-arm64 segfault and, under emulated amd64, an illegal
-  instruction (see `RECEIPTLESS_STATE.md`'s Session 5 follow-up for the
-  full story). Not a quality judgment: PaddleOCR's own benchmarks
-  (PP-StructureV3's table/layout awareness in particular) are a better fit
-  for receipts' line-item structure than Surya's. Worth trying again on
-  hardware with a properly supported PaddlePaddle build — e.g. an x86_64
-  Linux host/VM (native, not emulated) or once PaddlePaddle's arm64 wheels
-  mature — rather than assuming Surya is the permanent choice.
+- **OCR engine: Surya's model weights are non-commercially licensed —
+  needs Omar's explicit decision, not just a hardware upgrade.** Session
+  5's OCR feature (`ocr-service/`) runs Surya (`surya-ocr==0.6.2`)
+  instead of PaddleOCR purely because PaddleOCR's official pip binaries
+  crashed on the arm64 (Apple Silicon) dev machine this was built on — a
+  native-arm64 segfault and, under emulated amd64, an illegal instruction
+  (see `RECEIPTLESS_STATE.md`'s Session 5 follow-up for the full story).
+  That part is a hardware-compatibility problem, worth retrying on an
+  x86_64 host or once PaddlePaddle's arm64 wheels mature. But Surya's own
+  model weights (`vikp/surya_det3`/`vikp/surya_rec2`) are licensed
+  **CC-BY-NC-SA-4.0** — strictly non-commercial, confirmed directly
+  against HuggingFace's model-card metadata, not assumed — which directly
+  conflicts with this document's own "Commercial model" section above.
+  Three real options once this needs resolving, not just "wait for better
+  hardware": (1) retry PaddleOCR/PP-StructureV3 (Apache 2.0, plus better
+  table/layout handling for receipts specifically) once hardware allows;
+  (2) benchmark **docTR** (github.com/mindee/doctr) — PyTorch-based like
+  Surya so no arm64 compatibility risk, and genuinely Apache 2.0 end to
+  end (code and weights), making it a cleaner drop-in than either Surya
+  or PaddleOCR on this exact point; (3) negotiate a commercial license
+  for Surya's weights directly, or accept the newer `surya-ocr` release's
+  ~$5M funding/revenue-threshold OpenRAIL license if Receiptless stays
+  under that. Not a decision to make silently — flag it back to Omar when
+  this repo gets anywhere near a real commercial deployment.

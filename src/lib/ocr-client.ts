@@ -22,12 +22,33 @@ export class OcrServiceError extends Error {
 
 const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL ?? "http://localhost:8868";
 
+// Real requests measured 83s-2.6min on this machine's CPU-only inference
+// (RECEIPTLESS_STATE.md's Session 5 follow-up) — generous headroom above
+// that, but a hard ceiling all the same: without one, a genuinely hung
+// service (not just slow) would hold this connection open indefinitely,
+// which the calling POST /api/receipts/ocr route has no timeout of its
+// own to bound either.
+const REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
+
 export class SuryaOcrClient implements OcrClient {
   async recognizeText(bytes: Buffer, contentType: string): Promise<string> {
     const formData = new FormData();
     formData.set("file", new Blob([Uint8Array.from(bytes)], { type: contentType }), "receipt");
 
-    const response = await fetch(`${OCR_SERVICE_URL}/ocr`, { method: "POST", body: formData });
+    let response: Response;
+    try {
+      response = await fetch(`${OCR_SERVICE_URL}/ocr`, {
+        method: "POST",
+        body: formData,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+    } catch (err) {
+      if (err instanceof Error && err.name === "TimeoutError") {
+        throw new OcrServiceError("The OCR service took too long to respond.");
+      }
+      throw new OcrServiceError("Could not reach the OCR service.");
+    }
+
     const body = (await response.json().catch(() => null)) as { text?: string } | null;
     if (!response.ok || typeof body?.text !== "string") {
       throw new OcrServiceError("The OCR service did not return usable text.");

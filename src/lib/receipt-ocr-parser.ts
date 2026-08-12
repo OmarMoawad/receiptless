@@ -97,6 +97,15 @@ function lineFuzzyMatchesTotal(line: string): boolean {
   return line.split(/\s+/).some(fuzzyMatchesTotal);
 }
 
+// A bare word within edit-distance-2 of "total" isn't rare enough on its
+// own to trust — e.g. "local" is exactly distance 2 too (confirmed in a
+// 2026-08-12 review), so a line like "Local 9.99" could otherwise be
+// mistaken for a total. Both real OCR misreads this fallback exists for
+// ("Jotal 1.23 $2.00", "Tote. $23 75") happen to have a currency symbol
+// right there already, so requiring one costs nothing on real cases while
+// meaningfully cutting the false-positive rate on unrelated words.
+const HAS_CURRENCY_SYMBOL = /[$€£]/;
+
 /**
  * Converts a matched amount string (e.g. "$12.99", "1,234.56", "12,99")
  * into integer minor units. Assumes the last "." or "," in the string is
@@ -170,6 +179,7 @@ function guessTotalMinor(lines: string[]): number | null {
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
     if (NON_TOTAL_TOTAL_LINE.test(line) || !lineFuzzyMatchesTotal(line)) continue;
+    if (!HAS_CURRENCY_SYMBOL.test(line)) continue;
     const minor = matchAmountMinor(line);
     if (minor !== null) return minor;
   }
