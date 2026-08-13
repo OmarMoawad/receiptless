@@ -32,12 +32,21 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
   if (body === null) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
 
+  let email: ReturnType<typeof normalizePostmarkInbound>;
   try {
-    const result = await ingestInboundEmail(normalizePostmarkInbound(body));
+    email = normalizePostmarkInbound(body);
+  } catch {
+    return NextResponse.json({ error: "Invalid inbound email payload" }, { status: 400 });
+  }
+
+  try {
+    const result = await ingestInboundEmail(email);
     if (result.status === "created") return NextResponse.json(result, { status: 201 });
     if (result.status === "duplicate") return NextResponse.json({ status: "duplicate" });
     return NextResponse.json({ status: "ignored" });
   } catch {
-    return NextResponse.json({ error: "Invalid inbound email payload" }, { status: 400 });
+    // A transient failure (e.g. the database) — 500 so Postmark retries the
+    // delivery, distinct from a permanently malformed payload (400 above).
+    return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }
