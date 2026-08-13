@@ -10,7 +10,16 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-Last updated: 2026-08-12 — **Session 5 follow-up, same day: real-browser
+Last updated: 2026-08-13 — **Session 6: provider-neutral forwarded-email
+ingestion with a Postmark adapter is implemented and automated-test verified.**
+Each user gets a stable opaque plus-address; the Basic-authenticated webhook
+normalizes bounded text/HTML, routes only through the server-resolved mailbox
+token, creates owner-scoped `EMAIL` / `IMPORTED` receipts, and records provider
+message IDs so Postmark retries are idempotent. Inbound content cannot mutate
+existing Merchant metadata or claim merchant verification. Real Postmark,
+domain/DNS, HTTPS deployment, IP allowlisting, and an end-to-end delivery
+click-through still need Omar and are not claimed complete. Session 5 follow-up
+was the prior session: real-browser
 click-through with Omar found real bugs, then a real architecture
 change** (see "Completed components (Session 5 follow-up)" below). The
 click-through found three genuine parser bugs (all fixed) and confirmed a
@@ -44,12 +53,16 @@ phase-sized task, so receiptless can be worked in daily increments the
 same way IDent's Phase 0B has been — pick up this file, do the next
 session, update it, commit, push.
 
+Session 6 verification on 2026-08-13: **111 tests across 21 files passed**,
+`npm run typecheck` passed, `npm run build` passed, and ESLint reported zero
+errors (two pre-existing unused-parameter warnings in the claim action).
+
 ## Current phase
 
 **Phase 1 — Reliable ingestion + accounts** (ROADMAP.md), in progress.
 Sessions 1 (Postgres + testing/CI baseline), 2 (user accounts), 3 (vault
 scoped to a user), 4 (real object storage for photos), and 5 (OCR on
-photo uploads) are done — see "Completed components" below. Phase 0
+photo uploads), and 6 (forwarded-email ingestion) are done — see "Completed components" below. Phase 0
 (canonical foundation) was done before this file existed.
 
 Phase 1 is one paragraph in ROADMAP.md but six real, multi-day pieces of
@@ -966,7 +979,13 @@ gaps.
    grows one. 6 new tests. **Not yet browser-click-through-verified** —
    see "Completed components (Session 5)" above.
 
-6. **Email ingestion, path A: forward-to address.** The simplest path
+6. ~~**Email ingestion, path A: forward-to address.**~~ Done 2026-08-13:
+   provider-neutral normalization/ingestion with a Postmark adapter,
+   per-user opaque forwarding tokens, HTTP Basic webhook authentication,
+   owner-scoped `EMAIL` / `IMPORTED` receipts, and retry idempotency.
+   **Still needs Omar for production activation:** domain, Postmark account,
+   public HTTPS webhook, deployment IP allowlisting, and real delivery
+   click-through. The original scope follows for context. The simplest path
    first, per ROADMAP.md's own note that most digital receipts already
    arrive this way today. A per-user forward-to address, a webhook that
    receives inbound mail and parses it into a `Receipt` at

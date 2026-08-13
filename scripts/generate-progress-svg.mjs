@@ -17,7 +17,7 @@ import { dirname, resolve } from "node:path";
 
 const PHASES = [
   { name: "Canonical foundation", status: "done" },
-  { name: "Reliable ingestion + accounts", status: "current", sessionsDone: 5, sessionsTotal: 9 },
+  { name: "Reliable ingestion + accounts", status: "current", sessionsDone: 6, sessionsTotal: 9 },
   { name: "Vault maturity", status: "pending" },
   { name: "Merchant API / SDK", status: "pending" },
   { name: "Merchant terminals & payment integration", status: "pending" },
