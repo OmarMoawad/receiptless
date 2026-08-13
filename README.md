@@ -67,6 +67,28 @@ The webhook imports text/HTML bodies idempotently as owner-scoped `EMAIL` /
 merchant-verified. A real Postmark account, domain, public HTTPS deployment,
 and end-to-end delivery click-through are still required before production.
 
+### Receipt format adapters (Session 7)
+
+Inbound email is parsed by `src/lib/receipt-adapters/`, which picks a parser
+from the email's structure rather than from the retailer's name:
+
+| Adapter | Format | Typical sender |
+| --- | --- | --- |
+| `order-summary` | Order reference + itemized rows + labelled grand total | E-commerce, food delivery |
+| `key-value` | `Label: value` block, single charge, no itemization | Ride-hailing, fuel, subscriptions |
+| `pos-slip` | Printed till slip as plain text (fallback) | In-store receipts, forwarded scans |
+
+The first adapter whose `detect()` matches wins; `pos-slip` always matches,
+so there is always a parse. A retailer-specific adapter, if one is ever
+needed, goes at the front of the array in `registry.ts` — nothing else in
+the pipeline changes. Which adapter handled a delivery is recorded on
+`InboundEmailDelivery.adapterId`.
+
+> **Fixtures are synthetic.** The adapter tests use hand-written samples
+> representative of each format, not real receipts. They verify the adapters
+> and dispatch, not that any specific retailer's mail matches — see
+> `receipt-adapters/fixtures.ts`.
+
 ## Checks (same as CI)
 
 ```bash

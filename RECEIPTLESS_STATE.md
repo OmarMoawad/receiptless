@@ -10,7 +10,27 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-Last updated: 2026-08-13 — **Session 6: provider-neutral forwarded-email
+Last updated: 2026-08-13 — **Session 7: format-keyed receipt parser
+adapters are implemented and automated-test verified.** Email parsing now
+runs through a registry (`src/lib/receipt-adapters/`) that picks a parser
+from the email's *structure* — an itemized order summary, a labelled
+key/value block, or a printed point-of-sale slip — instead of running every
+email through the OCR slip heuristics. ROADMAP.md calls this bullet
+"per-retailer parser adapters"; building it format-keyed rather than
+brand-keyed was **decided with Omar (2026-08-13)**, because a brand adapter
+helps exactly one retailer and breaks the first time that retailer restyles
+its mail. A brand-specific adapter can still be prepended to the registry
+later for a format none of the three cover. Two real gaps closed on the way:
+a receipt now takes its date from the email (printed date, else the `Date`
+header) rather than the ingestion clock, and each delivery records which
+adapter parsed it (`InboundEmailDelivery.adapterId`). **Fixture caveat, not
+a detail:** the roadmap asked for tests against real anonymized receipts;
+Omar's actual receipt mail was not available, so every fixture in
+`receipt-adapters/fixtures.ts` is **synthetic and clearly marked as such**.
+The tests prove the adapters and dispatch behave as specified, *not* that
+any real retailer's email looks like this — validating that against genuine
+mail is the first task of a future session. Session 6 was the prior session:
+**provider-neutral forwarded-email
 ingestion with a Postmark adapter is implemented and automated-test verified.**
 Each user gets a stable opaque plus-address; the Basic-authenticated webhook
 normalizes bounded text/HTML, routes only through the server-resolved mailbox
@@ -1000,10 +1020,25 @@ gaps.
    file called Phase 1 "complete" after Session 8 while also calling OAuth
    real Phase 1 scope — those can't both be true; Session 9 resolves it.)
 
-7. **Per-retailer parser adapters.** 2-3 real adapters (pick retailers
-   Omar actually has receipts from) built on `parseInlinePayload`'s
-   existing seed and Session 6's email parser. Tests per adapter against
-   real (anonymized) sample receipt text/HTML fixtures.
+7. ~~**Per-retailer parser adapters.**~~ Done 2026-08-13, built
+   **format-keyed rather than brand-keyed** (decided with Omar — see this
+   file's header for why). `src/lib/receipt-adapters/`: a registry that
+   dispatches on structure to one of three adapters — `order-summary`
+   (itemized e-commerce confirmation, labelled grand total, real
+   quantities), `key-value` (single-charge ride/fuel/subscription receipt,
+   explicitly *no* line items so a total row can't become a phantom item),
+   and `pos-slip` (the fallback, bridging to `receipt-ocr-parser.ts` so
+   unstructured receipt text has one parser regardless of whether a photo
+   or an email produced it). Also closed two real gaps: purchase date now
+   comes from the email (printed date, else the `Date` header, with
+   future/implausible dates rejected) instead of the ingestion clock, and
+   `InboundEmailDelivery.adapterId` records which adapter parsed each
+   delivery. 25 new tests (136 total). **Open, deliberately deferred:**
+   fixtures are synthetic, not real anonymized receipts (see header) —
+   revalidate and tune `detect()`/`parse()` against Omar's genuine receipt
+   mail in a future session, and replace the synthetic fixtures rather than
+   adding more beside them. A brand-specific adapter, if one is ever
+   genuinely needed, goes at the *front* of `registry.ts`'s array.
 
 8. **Hosting: Vercel + hosted Postgres.** Not first despite ROADMAP.md
    listing it first — see the hard gate below for why: no real account
