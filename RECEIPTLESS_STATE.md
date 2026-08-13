@@ -10,6 +10,11 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
+> **Next action: Objective 0 — land the review stack.** Three PRs are open
+> and `main` is fifteen commits behind. Everything else in this file is
+> blocked on that. See "Objective 0" near the end for the per-PR review
+> guide and merge order.
+
 Last updated: 2026-08-13 — **Sessions 8 and 9 done: Phase 1 is
 code-complete.** Session 8 turned `/api/merchant/receipts`'s "local/demo
 only" doc comment into a real gate (off by default in any deployed
@@ -1182,7 +1187,35 @@ Omar). Both sessions are built and tested up to exactly the line where a
 real account is required, and neither is claimed as verified against real
 infrastructure.
 
-## Session 10 — one production-like vertical slice (DO THIS NEXT)
+## Objective 0 — land the review stack (BLOCKS EVERYTHING BELOW)
+
+**This is the first thing to work on. Nothing else starts until it is
+done.** Three PRs are open and `main` is fifteen commits behind. Nothing
+here is finished while it lives in a branch, and every day the stack sits
+it drifts further from `main` and from itself.
+
+Needs Omar's review; needs no accounts, no credentials, and no
+infrastructure.
+
+### Merge in order — each is based on its predecessor, not on `main`
+
+| PR | Focus of review | Est. |
+| --- | --- | --- |
+| [#1](https://github.com/OmarMoawad/receiptless/pull/1) — forwarded-email ingestion | The opaque plus-address scheme and how a delivery is routed to an owner | ~10 min |
+| [#2](https://github.com/OmarMoawad/receiptless/pull/2) — parser adapters | **Carries a security fix.** The email `Date` header was being used as the clock that validated dates, so a spoofed header authorised itself. Check the trusted-clock split in `receipt-adapters/registry.ts` | ~15 min |
+| [#3](https://github.com/OmarMoawad/receiptless/pull/3) — hosting prep + Gmail scan | **Read this one closely.** Carries the committed-encryption-key fix. The question worth answering: does the readiness gate in `deployment.ts` cover *every* path a deploy could take to reach `oauth-token-crypto.ts`? | ~25 min |
+
+Merging out of order will create conflicts, because each branch is based on
+the one before it rather than on `main`.
+
+### Done when
+
+- All three are merged and `main` contains them
+- CI is green **on `main`**, not only on the branches
+- The merged `agent/*` branches and their worktrees are deleted
+- `docs/progress.svg` regenerated from `main`
+
+## Session 10 — one production-like vertical slice (after Objective 0)
 
 Inserted ahead of the Phase 2 cadence below on CTO review, 2026-08-13. The
 instruction was explicit: **pause new surface area until one production-like
@@ -1197,27 +1230,25 @@ than reducing it.
 
 ### Part A — no accounts needed, can start immediately
 
-1. **Land the stack.** Three PRs (#1 → #2 → #3) sit unmerged, and `main` is
-   fifteen commits stale. Nothing is finished while it is in a branch.
-2. **Scope every evidence claim in the docs.** Replace bare "proven" and
+1. **Scope every evidence claim in the docs.** Replace bare "proven" and
    "verified" with what was actually demonstrated, on what, at which
    commit — e.g. "exercised against local Postgres at `b5cc264`", not
    "proven". The CTO's point stands: an unscoped claim is weaker than a
    narrow one, because a reader cannot tell what it covers.
-3. **Attach traceable evidence.** Every status or numeric claim gets a
+2. **Attach traceable evidence.** Every status or numeric claim gets a
    durable link — CI run, PR, commit SHA, test log. "Green" is
    time-sensitive; record the head SHA and the timestamp it was checked.
 
 ### Part B — needs Omar's accounts
 
-4. **Real Google OAuth client.** Highest-leverage credential in either
+3. **Real Google OAuth client.** Highest-leverage credential in either
    repo: one client unblocks this repo's Gmail scanner *and* IDent's Gmail
    and Calendar sync. Until it exists, the second ingestion path is
    theory.
-5. **Deploy.** Vercel project plus hosted Postgres, per DEPLOYMENT.md. The
+4. **Deploy.** Vercel project plus hosted Postgres, per DEPLOYMENT.md. The
    runbook, `vercel.json`, and `/api/health` are written and have never met
    real infrastructure.
-6. **The slice itself, end to end with real data:** connect a real Gmail
+5. **The slice itself, end to end with real data:** connect a real Gmail
    account → scan → a real receipt lands in the vault → it is searchable.
    One path, working in production, beats five more sessions of code.
 
