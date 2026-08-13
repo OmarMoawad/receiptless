@@ -58,6 +58,7 @@ model User {
   sessions     Session[]
   receipts     Receipt[]
   inboundEmailAddress InboundEmailAddress?
+  inboundEmailDeliveries InboundEmailDelivery[]
 }
 
 model InboundEmailAddress {
@@ -139,6 +140,7 @@ model Receipt {
   notes      String?
 
   items ReceiptItem[]
+  inboundEmailDelivery InboundEmailDelivery?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -147,6 +149,20 @@ model Receipt {
   @@index([category])
   @@index([merchantId])
   @@index([ownerId])
+}
+
+model InboundEmailDelivery {
+  id                String   @id @default(cuid())
+  provider          String
+  providerMessageId String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId            String
+  receipt           Receipt? @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+  receiptId         String?  @unique
+  createdAt         DateTime @default(now())
+
+  @@unique([provider, providerMessageId])
+  @@index([userId])
 }
 
 model ReceiptItem {
