@@ -1182,6 +1182,67 @@ Omar). Both sessions are built and tested up to exactly the line where a
 real account is required, and neither is claimed as verified against real
 infrastructure.
 
+## Session 10 — one production-like vertical slice (DO THIS NEXT)
+
+Inserted ahead of the Phase 2 cadence below on CTO review, 2026-08-13. The
+instruction was explicit: **pause new surface area until one production-like
+vertical slice is exercised.** Phase 2's five sessions do not start until
+this one is done.
+
+The reasoning is hard to argue with. This repo has accumulated 200 tests
+and nine sessions of features without a production-like environment or a
+single real OAuth integration. Every external dependency is exercised
+against a fake. More tested code on that foundation compounds risk rather
+than reducing it.
+
+### Part A — no accounts needed, can start immediately
+
+1. **Land the stack.** Three PRs (#1 → #2 → #3) sit unmerged, and `main` is
+   fifteen commits stale. Nothing is finished while it is in a branch.
+2. **Scope every evidence claim in the docs.** Replace bare "proven" and
+   "verified" with what was actually demonstrated, on what, at which
+   commit — e.g. "exercised against local Postgres at `b5cc264`", not
+   "proven". The CTO's point stands: an unscoped claim is weaker than a
+   narrow one, because a reader cannot tell what it covers.
+3. **Attach traceable evidence.** Every status or numeric claim gets a
+   durable link — CI run, PR, commit SHA, test log. "Green" is
+   time-sensitive; record the head SHA and the timestamp it was checked.
+
+### Part B — needs Omar's accounts
+
+4. **Real Google OAuth client.** Highest-leverage credential in either
+   repo: one client unblocks this repo's Gmail scanner *and* IDent's Gmail
+   and Calendar sync. Until it exists, the second ingestion path is
+   theory.
+5. **Deploy.** Vercel project plus hosted Postgres, per DEPLOYMENT.md. The
+   runbook, `vercel.json`, and `/api/health` are written and have never met
+   real infrastructure.
+6. **The slice itself, end to end with real data:** connect a real Gmail
+   account → scan → a real receipt lands in the vault → it is searchable.
+   One path, working in production, beats five more sessions of code.
+
+### Exit criteria — all of these, not a subset
+
+The CTO named the pieces that make a slice "production-like" rather than
+merely deployed. A deploy that lacks these is not this session's goal:
+
+- **Real identity and OAuth** — a genuine Google account, not a fake client
+- **Secret management** — no secrets in the repo or in build logs; the
+  `EMAIL_OAUTH_ENCRYPTION_KEY` gate verified against the real environment
+- **Observability** — error tracking and a log drain, so a production
+  failure is visible without SSH
+- **Rollback** — documented *and rehearsed at least once*, not just written
+- **Readiness checks** — `/api/health` exercised against the real database
+  and returning the expected shape
+- **Migration procedure** — run as a release step against the real
+  database, since migrations were deliberately taken out of the build
+
+### Deliberately still open
+
+The Surya OCR service has no hosting story and is **out of scope here** —
+photo OCR will not work in this slice, and that is an accepted limitation
+of a deliberately narrow first deployment rather than an oversight.
+
 ## Session cadence for Phase 2 — re-baselined 2026-08-13
 
 Phase 2 is "vault maturity" (ROADMAP.md): making what's already captured
