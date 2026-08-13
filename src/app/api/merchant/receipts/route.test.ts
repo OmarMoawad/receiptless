@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db";
 import { POST } from "./route";
 
@@ -80,5 +80,19 @@ describe("POST /api/merchant/receipts", () => {
 
     const stored = await prisma.merchant.findUnique({ where: { name: merchant } });
     expect(stored?.website).toBe("https://real.example");
+  });
+
+  it("is closed in a deployed environment unless explicitly enabled (Session 8)", async () => {
+    const merchant = uniqueMerchantName();
+
+    vi.stubEnv("VERCEL_ENV", "production");
+    const blocked = await POST(postRequest(validPayload({ merchant })));
+    // 404, not 403 — a disabled deployment shouldn't advertise the endpoint.
+    expect(blocked.status).toBe(404);
+    expect(await prisma.merchant.findUnique({ where: { name: merchant } })).toBeNull();
+
+    vi.stubEnv("MERCHANT_API_ENABLED", "true");
+    expect((await POST(postRequest(validPayload({ merchant })))).status).toBe(201);
+    vi.unstubAllEnvs();
   });
 });
