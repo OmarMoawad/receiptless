@@ -57,6 +57,15 @@ model User {
   createdAt    DateTime  @default(now())
   sessions     Session[]
   receipts     Receipt[]
+  inboundEmailAddress InboundEmailAddress?
+}
+
+model InboundEmailAddress {
+  id           String   @id @default(cuid())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId       String   @unique
+  mailboxToken String   @unique
+  createdAt    DateTime @default(now())
 }
 
 // Only the sha256 hash of the bearer session-cookie value is stored — the
