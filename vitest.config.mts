@@ -23,6 +23,5 @@ export default defineConfig({
      * contention (a schema or database per worker), not on its own.
      */
     maxWorkers: 4,
-    minWorkers: 1,
   },
 });
