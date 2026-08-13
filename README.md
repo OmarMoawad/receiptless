@@ -89,6 +89,34 @@ the pipeline changes. Which adapter handled a delivery is recorded on
 > and dispatch, not that any specific retailer's mail matches — see
 > `receipt-adapters/fixtures.ts`.
 
+### Gmail receipt scanning (Session 9)
+
+The second ingestion path alongside the forward-to address: connect a
+Gmail account and scan it for receipts on demand.
+
+| Route | Purpose |
+| --- | --- |
+| `POST /api/email/connections/gmail/start` | Returns a Google consent URL (PKCE, `gmail.readonly` only) |
+| `GET /api/email/connections/gmail/callback` | Google's redirect; consumes the single-use state |
+| `GET /api/email/connections` | The caller's connections, never any token material |
+| `POST /api/email/connections/:id/scan` | Scans on demand and ingests receipts |
+| `POST /api/email/connections/:id/disconnect` | Clears stored tokens outright |
+
+Scanned messages go through the *same* pipeline as forwarded ones — the
+Session 7 format adapters, the same idempotency key, the same
+merchant-metadata protection — so a receipt imports identically whichever
+way it arrived. Deliveries are recorded with `provider: "gmail"`, so the
+same message arriving both ways is two deliveries but a re-scan is not.
+
+A failing message is counted and skipped rather than aborting the scan.
+Tokens are stored as one opaque AES-256-GCM blob and never leave the
+backend; disconnecting deletes the token material rather than flipping a
+flag.
+
+> **Not verified against real Google credentials.** No OAuth client exists
+> yet, so the flow is covered by tests against a fake API client only —
+> see RECEIPTLESS_STATE.md.
+
 ## Checks (same as CI)
 
 ```bash

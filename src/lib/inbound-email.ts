@@ -1,7 +1,17 @@
 export type InboundEmail = {
-  provider: "postmark";
+  /**
+   * Which connector delivered this. Part of the idempotency key on
+   * InboundEmailDelivery, so the same message arriving via two connectors
+   * is two deliveries, but the same connector retrying is one.
+   */
+  provider: "postmark" | "gmail";
   providerMessageId: string;
-  mailboxToken: string;
+  /**
+   * Session 6's forward-to path resolves the owning user from this token.
+   * The Session 9 OAuth path already knows the user from the connection
+   * being scanned, so it has no mailbox token — hence null.
+   */
+  mailboxToken: string | null;
   from: string;
   subject: string | null;
   text: string;
