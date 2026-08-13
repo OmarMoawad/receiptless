@@ -18,7 +18,7 @@ import { dirname, resolve } from "node:path";
 const PHASES = [
   { name: "Canonical foundation", status: "done" },
   { name: "Reliable ingestion + accounts", status: "done" },
-  { name: "Vault maturity", status: "current", sessionsDone: 0, sessionsTotal: 5 },
+  { name: "Vault maturity", status: "current", sessionsDone: 0, sessionsTotal: 6 },
   { name: "Merchant API / SDK", status: "pending" },
   { name: "Merchant terminals & payment integration", status: "pending" },
   { name: "Native apps + platform NFC", status: "pending" },
