@@ -53,16 +53,40 @@ export function detectCurrency(text: string): string | null {
  * time). A receipt with an unreadable date is better left for the caller
  * to fall back on than confidently dated to the wrong day.
  */
+/**
+ * Date.UTC silently rolls impossible dates forward — Date.UTC(2026, 1, 31)
+ * is 3 March, and 29 February in a non-leap year becomes 1 March. A
+ * receipt printing an impossible date is corrupt input, and quietly filing
+ * it under a different (wrong) day is worse than admitting we can't read
+ * it. So every component is read back off the constructed date and must
+ * match what was captured.
+ */
+function utcDateExact(year: number, month: number, day: number, hour = 0, minute = 0): Date | null {
+  if (month < 0 || month > 11 || day < 1 || day > 31 || hour > 23 || minute > 59) return null;
+  const date = new Date(Date.UTC(year, month, day, hour, minute));
+  if (Number.isNaN(date.getTime())) return null;
+  const roundTrips =
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month &&
+    date.getUTCDate() === day &&
+    date.getUTCHours() === hour &&
+    date.getUTCMinutes() === minute;
+  return roundTrips ? date : null;
+}
+
 export function parseReceiptDate(raw: string): Date | null {
   const text = raw.trim();
 
   // ISO-8601 (2026-08-13, optionally with a time) — unambiguous.
   const iso = text.match(/\b(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?\b/);
   if (iso) {
-    const date = new Date(
-      Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]), Number(iso[4] ?? 0), Number(iso[5] ?? 0)),
+    return utcDateExact(
+      Number(iso[1]),
+      Number(iso[2]) - 1,
+      Number(iso[3]),
+      Number(iso[4] ?? 0),
+      Number(iso[5] ?? 0),
     );
-    return Number.isNaN(date.getTime()) ? null : date;
   }
 
   // "13 August 2026" / "August 13, 2026" — the month name removes the
@@ -89,10 +113,9 @@ export function parseReceiptDate(raw: string): Date | null {
     const monthToken = (dayFirst ? dayFirst[2] : monthFirst![1]).toLowerCase();
     const year = Number(dayFirst ? dayFirst[3] : monthFirst![3]);
     const month = months.findIndex((name) => name.startsWith(monthToken));
-    if (month >= 0 && day >= 1 && day <= 31) {
-      const date = new Date(Date.UTC(year, month, day));
-      return Number.isNaN(date.getTime()) ? null : date;
-    }
+    // Same exact-round-trip rule as the ISO path — "31 February 2026" is
+    // corrupt input, not a date in March.
+    if (month >= 0) return utcDateExact(year, month, day);
   }
 
   return null;

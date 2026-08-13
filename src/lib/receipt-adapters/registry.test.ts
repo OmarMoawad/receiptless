@@ -121,3 +121,42 @@ describe("conservative defaults", () => {
     expect(parsed.merchant).toBe("Shopname");
   });
 });
+
+describe("the email Date header is untrusted input, not the clock", () => {
+  const FAR_FUTURE = new Date("2099-01-01T00:00:00Z");
+
+  it("ignores a future Date header instead of filing the receipt in 2099", () => {
+    const parsed = resolveEmailReceipt(fixtureEmail({ text: "Shop\nTOTAL $5.00", receivedAt: FAR_FUTURE }), NOW);
+    expect(parsed.purchasedAt).toEqual(NOW);
+  });
+
+  it("still rejects a printed future date even when the header agrees with it", () => {
+    const parsed = resolveEmailReceipt(
+      fixtureEmail({ text: "Shop\nDated 2099-06-15\nTOTAL $5.00", receivedAt: FAR_FUTURE }),
+      NOW,
+    );
+    expect(parsed.purchasedAt).toEqual(NOW);
+  });
+
+  it("uses a plausible Date header when the body prints no date", () => {
+    const headerDate = new Date("2026-08-04T10:15:00Z");
+    const parsed = resolveEmailReceipt(fixtureEmail({ text: "Shop\nTOTAL $5.00", receivedAt: headerDate }), NOW);
+    expect(parsed.purchasedAt).toEqual(headerDate);
+  });
+
+  it("prefers the printed date over the header when both are plausible", () => {
+    const parsed = resolveEmailReceipt(
+      fixtureEmail({ text: "Shop\n2026-07-04\nTOTAL $5.00", receivedAt: new Date("2026-08-04T10:15:00Z") }),
+      NOW,
+    );
+    expect(parsed.purchasedAt.toISOString()).toBe("2026-07-04T00:00:00.000Z");
+  });
+
+  it("ignores an implausibly old Date header", () => {
+    const parsed = resolveEmailReceipt(
+      fixtureEmail({ text: "Shop\nTOTAL $5.00", receivedAt: new Date("1970-01-01T00:00:00Z") }),
+      NOW,
+    );
+    expect(parsed.purchasedAt).toEqual(NOW);
+  });
+});

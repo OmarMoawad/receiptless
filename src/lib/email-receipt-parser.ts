@@ -19,12 +19,11 @@ export type ParsedEmailReceipt = {
 };
 
 /**
- * `receivedAt` is the delivery timestamp used when the email states no
- * readable purchase date. Session 6 always used the ingestion clock here;
- * the adapters now extract a real date when the receipt prints one, so a
- * receipt forwarded days late no longer files under the day it was
- * forwarded.
+ * `ingestedAt` must be the caller's own clock — it is the trusted
+ * reference the untrusted candidate dates (the printed date and the
+ * email's sender-set `Date` header) are validated against. Never pass a
+ * value derived from the email itself; see resolveEmailReceipt.
  */
-export function parseEmailReceipt(email: InboundEmail, receivedAt: Date = new Date()): ParsedEmailReceipt {
-  return resolveEmailReceipt(email, receivedAt);
+export function parseEmailReceipt(email: InboundEmail, ingestedAt: Date = new Date()): ParsedEmailReceipt {
+  return resolveEmailReceipt(email, ingestedAt);
 }

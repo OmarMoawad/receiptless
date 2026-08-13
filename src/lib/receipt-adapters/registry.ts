@@ -43,9 +43,21 @@ export function selectAdapter(email: InboundEmail): ReceiptAdapter {
  */
 const FUTURE_TOLERANCE_MS = 24 * 60 * 60 * 1000;
 
-function usableDate(candidate: Date | null, now: Date): Date | null {
+/**
+ * Validates a candidate purchase date against `ingestedAt` — which must be
+ * *our own* clock, never anything the sender supplied.
+ *
+ * This distinction is the whole point of the parameter's name. An earlier
+ * version passed the email's own `Date` header in here as the comparison
+ * clock, which let a sender defeat the check with the very value being
+ * checked: `Date: 2099-01-01` both became the fallback purchase date and
+ * raised the future-date ceiling high enough for a printed 2099 date to
+ * pass. Every candidate — printed date and email header alike — is now
+ * measured against the trusted clock only.
+ */
+function usableDate(candidate: Date | null, ingestedAt: Date): Date | null {
   if (!candidate || Number.isNaN(candidate.getTime())) return null;
-  if (candidate.getTime() > now.getTime() + FUTURE_TOLERANCE_MS) return null;
+  if (candidate.getTime() > ingestedAt.getTime() + FUTURE_TOLERANCE_MS) return null;
   // Reject implausibly old parses (a mis-read year like 0202) rather than
   // filing the receipt two millennia ago.
   if (candidate.getUTCFullYear() < 2000) return null;
@@ -58,21 +70,29 @@ function usableDate(candidate: Date | null, now: Date): Date | null {
  * in each adapter — an adapter reporting null means "not found", and this
  * is the single place that decides what "not found" becomes.
  *
- * `receivedAt` is the fallback purchase date (the delivery's own
- * timestamp), passed in rather than read from the clock here so ingestion
- * and tests agree on it.
+ * `ingestedAt` is *our* clock and the only trusted timestamp in play. The
+ * purchase date is resolved from three candidates in descending order of
+ * trustworthiness, and both untrusted ones must survive validation against
+ * `ingestedAt` before they are used:
+ *
+ *   1. the date printed on the receipt body (untrusted — validated)
+ *   2. the email's own Date header (untrusted, sender-set — validated)
+ *   3. `ingestedAt` itself (trusted, always usable)
  */
-export function resolveEmailReceipt(email: InboundEmail, receivedAt: Date = new Date()): ResolvedEmailReceipt {
+export function resolveEmailReceipt(email: InboundEmail, ingestedAt: Date = new Date()): ResolvedEmailReceipt {
   const adapter = selectAdapter(email);
   const result = adapter.parse(email);
   const merchant = result.merchant?.trim();
+
+  const printedDate = usableDate(result.purchasedAt, ingestedAt);
+  const headerDate = usableDate(email.receivedAt, ingestedAt);
 
   return {
     adapterId: adapter.id,
     merchant: merchant && merchant.length > 0 ? merchant.slice(0, 200) : UNKNOWN_MERCHANT,
     totalMinor: result.totalMinor ?? 0,
     currency: result.currency ?? DEFAULT_CURRENCY,
-    purchasedAt: usableDate(result.purchasedAt, receivedAt) ?? receivedAt,
+    purchasedAt: printedDate ?? headerDate ?? ingestedAt,
     items: result.items,
   };
 }

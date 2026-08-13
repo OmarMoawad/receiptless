@@ -19,9 +19,11 @@ export async function ingestInboundEmail(email: InboundEmail): Promise<InboundEm
       const delivery = await tx.inboundEmailDelivery.create({
         data: { provider: email.provider, providerMessageId: email.providerMessageId, userId: address.userId },
       });
-      // The email's own Date header when it had one, so a receipt
-      // forwarded days after the purchase isn't filed under today.
-      const parsed = parseEmailReceipt(email, email.receivedAt ?? new Date());
+      // Our own clock, deliberately — the email's Date header is
+      // sender-controlled and is validated against this inside the parser
+      // rather than replacing it. Passing email.receivedAt here would let
+      // a spoofed header both set and authorize its own purchase date.
+      const parsed = parseEmailReceipt(email, new Date());
       const merchant = await tx.merchant.upsert({
         where: { name: parsed.merchant },
         update: {},

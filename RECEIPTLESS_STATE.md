@@ -31,6 +31,30 @@ The tests prove the adapters and dispatch behave as specified, *not* that
 any real retailer's email looks like this — validating that against genuine
 mail is the first task of a future session.
 
+**Code review addressed, 2026-08-13.** Two real defects in this session's
+own work, both found by review rather than by the tests or the
+click-through — worth recording because both were *wrong-by-construction*
+rather than merely untested:
+
+1. **The email's `Date` header was being used as the clock that validates
+   dates** (`inbound-email-ingestion.ts` passed it in as `receivedAt`, and
+   the registry compared the printed date against that same value). A
+   sender could therefore set `Date: 2099-01-01` and have it both become
+   the purchase date *and* raise the future-date ceiling enough for a
+   printed 2099 date to pass — the check authorized the very input it was
+   meant to bound. Now there are two clearly separated timestamps:
+   `ingestedAt` (our clock, trusted, the only validation reference) and
+   the header (untrusted, just one more candidate that must itself pass
+   validation). Resolution order is printed date → header → `ingestedAt`.
+2. **Impossible calendar dates were silently rolled forward.** `Date.UTC`
+   turns 2026-02-31 into 3 March and 29 Feb in a non-leap year into 1
+   March, so a corrupt printed date became a confident wrong date. Every
+   component is now read back off the constructed date and must match;
+   leap-year and invalid-day cases are covered by tests.
+
+153 tests (was 136). The reviewer's other observations were accepted as
+correct and are reflected above.
+
 **Real-browser click-through done, 2026-08-13 — no bugs found**, the first
 session here where that's true. Against a live `npm run dev` and real
 Postgres: registered a user, `GET /api/email/forwarding-address` returned
