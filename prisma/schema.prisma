@@ -159,6 +159,10 @@ model InboundEmailDelivery {
   userId            String
   receipt           Receipt? @relation(fields: [receiptId], references: [id], onDelete: SetNull)
   receiptId         String?  @unique
+  // Which receipt-adapters/ format adapter parsed this delivery. Ingestion
+  // metadata, deliberately kept here rather than on Receipt: it records how
+  // receiptless read the email, not anything the merchant attested.
+  adapterId         String?
   createdAt         DateTime @default(now())
 
   @@unique([provider, providerMessageId])

@@ -19,7 +19,9 @@ export async function ingestInboundEmail(email: InboundEmail): Promise<InboundEm
       const delivery = await tx.inboundEmailDelivery.create({
         data: { provider: email.provider, providerMessageId: email.providerMessageId, userId: address.userId },
       });
-      const parsed = parseEmailReceipt(email);
+      // The email's own Date header when it had one, so a receipt
+      // forwarded days after the purchase isn't filed under today.
+      const parsed = parseEmailReceipt(email, email.receivedAt ?? new Date());
       const merchant = await tx.merchant.upsert({
         where: { name: parsed.merchant },
         update: {},
@@ -38,7 +40,10 @@ export async function ingestInboundEmail(email: InboundEmail): Promise<InboundEm
           items: parsed.items.length ? { create: parsed.items } : undefined,
         },
       });
-      await tx.inboundEmailDelivery.update({ where: { id: delivery.id }, data: { receiptId: receipt.id } });
+      await tx.inboundEmailDelivery.update({
+        where: { id: delivery.id },
+        data: { receiptId: receipt.id, adapterId: parsed.adapterId },
+      });
       return { status: "created" as const, receiptId: receipt.id };
     });
   } catch (error) {

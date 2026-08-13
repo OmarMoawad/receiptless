@@ -10,7 +10,19 @@ const postmarkInboundSchema = z.object({
   Subject: z.string().max(2_000).nullish(),
   TextBody: z.string().optional().default(""),
   HtmlBody: z.string().optional().default(""),
+  Date: z.string().max(200).nullish(),
 });
+
+/**
+ * The Date header is sender-controlled, so it is bounded the same way the
+ * body is: unparseable values become null (the caller falls back to its
+ * own clock) rather than propagating an Invalid Date into a receipt.
+ */
+function parseHeaderDate(raw: string | null | undefined): Date | null {
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
 
 const ENTITIES: Record<string, string> = {
   amp: "&",
@@ -46,5 +58,6 @@ export function normalizePostmarkInbound(input: unknown): InboundEmail {
     from: parsed.From,
     subject: parsed.Subject ?? null,
     text,
+    receivedAt: parseHeaderDate(parsed.Date),
   };
 }

@@ -13,6 +13,7 @@ function email(mailboxToken: string, overrides: Partial<InboundEmail> = {}): Inb
     from: "store@example.com",
     subject: "Receipt",
     text: "Immutable Merchant\nTea $2.00\nTOTAL $2.00",
+    receivedAt: null,
     ...overrides,
   };
 }
@@ -57,5 +58,28 @@ describe("ingestInboundEmail", () => {
     await prisma.inboundEmailAddress.create({ data: { userId: user.userId, mailboxToken } });
     await ingestInboundEmail(email(mailboxToken));
     expect((await prisma.merchant.findUnique({ where: { name: "Immutable Merchant" } }))?.website).toBe("https://trusted.example");
+  });
+
+  it("records which format adapter parsed the delivery", async () => {
+    const user = await registerTestUser();
+    const mailboxToken = randomUUID();
+    await prisma.inboundEmailAddress.create({ data: { userId: user.userId, mailboxToken } });
+    const delivery = email(mailboxToken);
+    await ingestInboundEmail(delivery);
+    const row = await prisma.inboundEmailDelivery.findFirst({
+      where: { providerMessageId: delivery.providerMessageId },
+    });
+    expect(row?.adapterId).toBe("pos-slip");
+  });
+
+  it("dates the receipt from the email, not the ingestion clock", async () => {
+    const user = await registerTestUser();
+    const mailboxToken = randomUUID();
+    await prisma.inboundEmailAddress.create({ data: { userId: user.userId, mailboxToken } });
+    const receivedAt = new Date("2026-06-15T08:00:00Z");
+    const result = await ingestInboundEmail(email(mailboxToken, { receivedAt }));
+    if (result.status !== "created") throw new Error("expected created");
+    const receipt = await prisma.receipt.findUnique({ where: { id: result.receiptId } });
+    expect(receipt?.purchasedAt).toEqual(receivedAt);
   });
 });
