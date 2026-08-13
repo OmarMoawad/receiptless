@@ -52,3 +52,6 @@ prisma/dev.db*
 ocr-service/__pycache__/
 ocr-service/*.pyc
 ocr-service/.venv/
+
+# isolated feature worktrees
+.worktrees/
