@@ -10,6 +10,12 @@ export type FakeGmailOptions = {
   profileEmail?: string;
   /** Message ids whose getMessage should throw, to exercise error isolation. */
   failingIds?: string[];
+  /**
+   * Message ids that return normally but whose *body* makes ingestion
+   * throw. Needed to test the cursor clamp: a message must be dated before
+   * it fails, which a getMessage-level throw never is.
+   */
+  poisonIds?: string[];
   exchange?: OAuthTokenResponse;
   refreshResponse?: OAuthTokenResponse;
 };
@@ -22,6 +28,7 @@ export type FakeGmail = GmailApiClient & {
 export function createFakeGmail(options: FakeGmailOptions = {}): FakeGmail {
   const messages = options.messages ?? [];
   const failing = new Set(options.failingIds ?? []);
+  const poison = new Set(options.poisonIds ?? []);
   const calls = { refresh: 0, exchange: 0, list: 0, get: [] as string[] };
 
   const fake: FakeGmail = {
@@ -53,7 +60,9 @@ export function createFakeGmail(options: FakeGmailOptions = {}): FakeGmail {
       if (failing.has(id)) throw new Error(`simulated Gmail failure for ${id}`);
       const message = messages.find((candidate) => candidate.id === id);
       if (!message) throw new Error(`no fake message ${id}`);
-      return message;
+      // POISON is a body the ingestion pipeline rejects, so the failure
+      // happens after toInboundEmail has read the Date header.
+      return poison.has(id) ? { ...message, bodyText: "__POISON__" } : message;
     },
   };
 

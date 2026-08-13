@@ -75,24 +75,70 @@ export async function scanGmailConnection(
   let duplicates = 0;
   let failures = 0;
   let newestSeen = connection.lastScannedAt ?? null;
+  // The timestamp of the *oldest* message that failed this scan. The
+  // cursor may never move past it — see the note below.
+  let earliestFailure: Date | null = null;
+  // Set when a message failed without yielding a date — see the catch below.
+  let undatedFailure = false;
 
   for (const id of ids) {
+    // Fetched before the try so a failure still yields a timestamp to
+    // clamp the cursor with; a message we cannot even date is handled by
+    // the conservative fallback below.
+    let receivedAt: Date | null = null;
     try {
       const message = await apiClient.getMessage(accessToken, id);
       const email = toInboundEmail(message);
+      receivedAt = email.receivedAt;
+      // Test-only sentinel: lets a test simulate an ingestion failure on a
+      // message that was successfully fetched and dated, which is the only
+      // shape that exercises the cursor clamp below.
+      if (process.env.NODE_ENV === "test" && email.text === "__POISON__") {
+        throw new Error("simulated ingestion failure");
+      }
       const result = await ingestEmailForUser(userId, email);
       if (result.status === "created") receiptsCreated += 1;
       if (result.status === "duplicate") duplicates += 1;
       if (email.receivedAt && (!newestSeen || email.receivedAt > newestSeen)) newestSeen = email.receivedAt;
     } catch {
       failures += 1;
+      if (receivedAt) {
+        if (!earliestFailure || receivedAt < earliestFailure) earliestFailure = receivedAt;
+      } else {
+        // Failed before it could be dated (the fetch itself threw), so
+        // there is no timestamp to clamp against and no safe way to know
+        // which part of the window was covered. Don't move at all.
+        undatedFailure = true;
+      }
     }
   }
 
-  // Only advanced past messages actually processed, so a failed scan
-  // doesn't skip the window it never managed to read.
-  if (newestSeen && newestSeen !== connection.lastScannedAt) {
-    await prisma.emailConnection.update({ where: { id: connectionId }, data: { lastScannedAt: newestSeen } });
+  /**
+   * The cursor must never move past a message that failed, or that message
+   * is excluded by every future `after:` query and is lost permanently.
+   *
+   * Gmail returns messages newest-first, so a failure at 10:00 alongside a
+   * success at 11:00 would otherwise advance the cursor to 11:00 and skip
+   * the 10:00 message forever. Clamping to just before the earliest
+   * failure means the next scan re-reads it — at the cost of re-reading
+   * the successes after it too, which is harmless because ingestion is
+   * idempotent on (provider, providerMessageId).
+   */
+  let nextCursor = newestSeen;
+  if (undatedFailure) {
+    // Nothing can be safely claimed as covered — leave the cursor exactly
+    // where it was so the whole window is re-scanned.
+    nextCursor = connection.lastScannedAt ?? null;
+  } else if (earliestFailure) {
+    const clamped = new Date(earliestFailure.getTime() - 1000);
+    nextCursor = !nextCursor || clamped < nextCursor ? clamped : nextCursor;
+    // Never move the cursor backwards from where it already was — that
+    // would re-scan mail already known to be handled.
+    if (connection.lastScannedAt && nextCursor < connection.lastScannedAt) nextCursor = connection.lastScannedAt;
+  }
+
+  if (nextCursor && nextCursor.getTime() !== connection.lastScannedAt?.getTime()) {
+    await prisma.emailConnection.update({ where: { id: connectionId }, data: { lastScannedAt: nextCursor } });
   }
 
   return { status: "scanned", messagesSeen: ids.length, receiptsCreated, duplicates, failures };

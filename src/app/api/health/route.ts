@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { isMerchantApiEnabled, missingProductionConfig } from "@/lib/deployment";
+import { insecureProductionConfig, isMerchantApiEnabled, missingProductionConfig } from "@/lib/deployment";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +16,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET() {
   const missingConfig = missingProductionConfig();
+  const insecureConfig = insecureProductionConfig();
   let database: "ok" | "unreachable" = "ok";
   try {
     await prisma.$queryRaw`SELECT 1`;
@@ -23,12 +24,16 @@ export async function GET() {
     database = "unreachable";
   }
 
-  const ready = database === "ok" && missingConfig.length === 0;
+  // Unsafe configuration fails readiness exactly like missing
+  // configuration — a deployment holding real tokens under the public dev
+  // key is not "degraded but serving", it is not fit to serve.
+  const ready = database === "ok" && missingConfig.length === 0 && insecureConfig.length === 0;
   return NextResponse.json(
     {
       status: ready ? "ok" : "degraded",
       database,
       missingConfig,
+      insecureConfig,
       merchantApiEnabled: isMerchantApiEnabled(),
       timestamp: new Date().toISOString(),
     },

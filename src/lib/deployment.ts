@@ -1,3 +1,5 @@
+import { InsecureEncryptionKeyError, resolveEncryptionKey } from "./oauth-token-crypto";
+
 /**
  * Session 8 (RECEIPTLESS_STATE.md): deployment-environment gates.
  *
@@ -56,5 +58,38 @@ export function missingProductionConfig(env: NodeJS.ProcessEnv = process.env): s
     missing.push(...postmarkKeys.filter((key) => !env[key]?.trim()));
   }
 
+  // Gmail OAuth is optional too, but a *partial* configuration is worse
+  // than none: the encryption key in particular has a committed dev-only
+  // fallback (see oauth-token-crypto.ts), so a deployment that configures
+  // OAuth without its own key would encrypt real refresh tokens under a
+  // key published in this repository. All four or nothing.
+  const gmailKeys = [
+    "GOOGLE_OAUTH_CLIENT_ID",
+    "GOOGLE_OAUTH_CLIENT_SECRET",
+    "GOOGLE_OAUTH_REDIRECT_URI",
+    "EMAIL_OAUTH_ENCRYPTION_KEY",
+  ];
+  const gmailSet = gmailKeys.filter((key) => env[key]?.trim());
+  if (gmailSet.length > 0 && gmailSet.length < gmailKeys.length) {
+    missing.push(...gmailKeys.filter((key) => !env[key]?.trim()));
+  }
+
   return missing;
+}
+
+/**
+ * Configuration that is present but *unsafe*, as distinct from absent.
+ * Reported separately so a deployment can say "this key is the public dev
+ * key" rather than the misleading "this key is missing".
+ */
+export function insecureProductionConfig(env: NodeJS.ProcessEnv = process.env): string[] {
+  if (!isDeployedEnvironment(env)) return [];
+  const problems: string[] = [];
+  try {
+    resolveEncryptionKey(env);
+  } catch (error) {
+    if (error instanceof InsecureEncryptionKeyError) problems.push("EMAIL_OAUTH_ENCRYPTION_KEY");
+    else throw error;
+  }
+  return problems;
 }

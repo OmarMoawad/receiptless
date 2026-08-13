@@ -164,3 +164,59 @@ describe("getActiveAccessToken", () => {
     expect(await getActiveAccessToken(connection.id, createFakeGmail())).toBeNull();
   });
 });
+
+describe("scan cursor retry semantics (review finding 2)", () => {
+  it("does not advance the cursor past an older message that failed", async () => {
+    // The exact regression: A at 10:00 fails, B at 11:00 succeeds. If the
+    // cursor advances to 11:00, A is excluded by every future after: query
+    // and is lost permanently.
+    const { user, connection } = await connectedMailbox();
+    const older = `m-older-${randomUUID()}`;
+    const newer = `m-newer-${randomUUID()}`;
+    const gmail = createFakeGmail({
+      messages: [
+        fakeMessage({ id: newer, date: "Tue, 4 Aug 2026 11:00:00 +0000", bodyText: "Newer Shop\nTOTAL $9.00" }),
+        fakeMessage({ id: older, date: "Tue, 4 Aug 2026 10:00:00 +0000" }),
+      ],
+      poisonIds: [older],
+    });
+
+    const result = await scanGmailConnection(connection.id, user.userId, gmail);
+    expect(result.failures).toBe(1);
+    expect(result.receiptsCreated).toBe(1);
+
+    const row = await prisma.emailConnection.findUnique({ where: { id: connection.id } });
+    // Clamped below the failure, not advanced to the 11:00 success.
+    expect(row?.lastScannedAt!.getTime()).toBeLessThan(new Date("2026-08-04T10:00:00Z").getTime());
+
+    // And the proof that matters: the failed message is inside the next
+    // scan's window, so it is retried rather than skipped forever.
+    await scanGmailConnection(connection.id, user.userId, gmail);
+    expect(gmail.lastListOptions!.after!.getTime()).toBeLessThan(new Date("2026-08-04T10:00:00Z").getTime());
+  });
+
+  it("does not advance at all when a message fails before it can be dated", async () => {
+    const { user, connection } = await connectedMailbox();
+    const bad = `m-undated-${randomUUID()}`;
+    const gmail = createFakeGmail({
+      messages: [fakeMessage({ id: bad, date: "Tue, 4 Aug 2026 10:00:00 +0000" })],
+      failingIds: [bad],
+    });
+
+    await scanGmailConnection(connection.id, user.userId, gmail);
+    const row = await prisma.emailConnection.findUnique({ where: { id: connection.id } });
+    // Nothing was successfully processed, so there is nothing to advance past.
+    expect(row?.lastScannedAt).toBeNull();
+  });
+
+  it("still advances normally when every message succeeds", async () => {
+    const { user, connection } = await connectedMailbox();
+    const gmail = createFakeGmail({
+      messages: [fakeMessage({ id: `m-${randomUUID()}`, date: "Tue, 4 Aug 2026 10:15:00 +0000" })],
+    });
+
+    await scanGmailConnection(connection.id, user.userId, gmail);
+    const row = await prisma.emailConnection.findUnique({ where: { id: connection.id } });
+    expect(row?.lastScannedAt?.toISOString()).toBe("2026-08-04T10:15:00.000Z");
+  });
+});

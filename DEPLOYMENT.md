@@ -43,6 +43,10 @@ database.
 | `POSTMARK_WEBHOOK_USERNAME` | if inbound email | |
 | `POSTMARK_WEBHOOK_PASSWORD` | if inbound email | Generate, don't invent |
 | `MERCHANT_API_ENABLED` | no | **Leave unset.** See below |
+| `GOOGLE_OAUTH_CLIENT_ID` | if Gmail scanning | All four or none |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | if Gmail scanning | |
+| `GOOGLE_OAUTH_REDIRECT_URI` | if Gmail scanning | Must match Google exactly |
+| `EMAIL_OAUTH_ENCRYPTION_KEY` | **if Gmail scanning** | Generate with `openssl rand -base64 32`. The built-in fallback is committed to this repo and is refused in any deployed environment |
 | `OCR_SERVICE_URL` | if OCR | The self-hosted Surya service |
 
 `missingProductionConfig` (`src/lib/deployment.ts`) enforces the required
@@ -61,27 +65,46 @@ returns 404 there. Locally it stays on with no configuration. Only set
 a demo, and unset it afterwards. The flag fails closed — only the exact
 string `true` enables it.
 
-## 4. Migrations
+## 4. Migrations — a release step, not a build step
 
-`vercel.json`'s build command runs `prisma migrate deploy` before
-`next build`, so a deploy applies pending migrations. Two consequences
-worth knowing before the first real deploy:
+The build command is `prisma generate && next build`. It deliberately does
+**not** run `prisma migrate deploy`.
 
-- A failing migration fails the build, so a bad migration does not reach
-  production half-applied.
-- Migrations run against whichever `DATABASE_URL` that environment has, so
-  preview environments must not share production's database.
+An earlier draft did, which was wrong: Vercel builds every preview and can
+build concurrently, so schema migrations would run from any preview build
+and potentially two at once. Compilation and schema change are different
+operations with different blast radii, and only one of them should be
+triggered by pushing a branch.
+
+Run migrations as an explicit release step against the intended database:
+
+```bash
+DATABASE_URL='<production connection string>' npx prisma migrate deploy
+```
+
+Do this **before** promoting the build that needs the new schema, so the
+old code briefly runs against the new schema rather than the reverse.
+That ordering means every migration must be backwards-compatible with the
+currently-deployed code — additive columns, no destructive renames in the
+same release.
+
+`/api/health` reports `database: "unreachable"` if the app cannot reach
+the database at all, but it does **not** verify the schema is current;
+confirm `prisma migrate status` separately.
 
 ## 5. Verify the deploy
 
 `GET /api/health` reports readiness without exposing any values:
 
 ```json
-{ "status": "ok", "database": "ok", "missingConfig": [], "merchantApiEnabled": false }
+{ "status": "ok", "database": "ok", "missingConfig": [], "insecureConfig": [], "merchantApiEnabled": false }
 ```
 
-It returns 503 while anything required is missing, listing every missing
-key at once. Check specifically that `merchantApiEnabled` is `false`.
+It returns 503 while anything required is missing *or unsafe*, listing
+every problem at once. `missingConfig` is what isn't set;
+`insecureConfig` is what is set but must not be used — currently just the
+committed dev encryption key. Check specifically that `merchantApiEnabled`
+is `false` and both arrays are empty.
 
 ## 6. Backups — do not skip
 

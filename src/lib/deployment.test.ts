@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { isDeployedEnvironment, isMerchantApiEnabled, missingProductionConfig } from "./deployment";
+import {
+  insecureProductionConfig,
+  isDeployedEnvironment,
+  isMerchantApiEnabled,
+  missingProductionConfig,
+} from "./deployment";
+import { InsecureEncryptionKeyError, resolveEncryptionKey } from "./oauth-token-crypto";
 
 const local = { NODE_ENV: "development" } as unknown as NodeJS.ProcessEnv;
 const deployed = { NODE_ENV: "production" } as unknown as NodeJS.ProcessEnv;
@@ -84,5 +90,73 @@ describe("missingProductionConfig", () => {
       POSTMARK_INBOUND_ADDRESS: "a@b.example",
     };
     expect(missingProductionConfig(full)).toEqual([]);
+  });
+});
+
+describe("OAuth encryption key (review finding 1)", () => {
+  const DEV_KEY = "Zx1pQ7yv3TgK8sHn2WdRfLmC5bJaVeXu9oPtYiUq0Ec=";
+  const realKey = Buffer.alloc(32, 9).toString("base64");
+
+  it("allows the committed dev key locally so a clean checkout works", () => {
+    expect(resolveEncryptionKey(local)).toHaveLength(32);
+  });
+
+  it("refuses to fall back to the committed key in a deployed environment", () => {
+    // The whole finding: without this, real Gmail refresh tokens would be
+    // encrypted under a key published in this repository.
+    expect(() => resolveEncryptionKey(deployed)).toThrow(InsecureEncryptionKeyError);
+    expect(() => resolveEncryptionKey(preview)).toThrow(InsecureEncryptionKeyError);
+  });
+
+  it("refuses the committed key even when it is set explicitly", () => {
+    expect(() => resolveEncryptionKey({ ...deployed, EMAIL_OAUTH_ENCRYPTION_KEY: DEV_KEY })).toThrow(
+      InsecureEncryptionKeyError,
+    );
+  });
+
+  it("accepts a unique 32-byte key in a deployed environment", () => {
+    expect(resolveEncryptionKey({ ...deployed, EMAIL_OAUTH_ENCRYPTION_KEY: realKey })).toHaveLength(32);
+  });
+
+  it("rejects a key of the wrong length", () => {
+    expect(() => resolveEncryptionKey({ ...deployed, EMAIL_OAUTH_ENCRYPTION_KEY: "dG9vLXNob3J0" })).toThrow(
+      /exactly 32 bytes/,
+    );
+  });
+
+  it("reports an unsafe key through readiness, distinctly from a missing one", () => {
+    expect(insecureProductionConfig(deployed)).toEqual(["EMAIL_OAUTH_ENCRYPTION_KEY"]);
+    expect(insecureProductionConfig({ ...deployed, EMAIL_OAUTH_ENCRYPTION_KEY: realKey })).toEqual([]);
+    // Local dev is never "insecure" — the dev key is legitimate there.
+    expect(insecureProductionConfig(local)).toEqual([]);
+  });
+});
+
+describe("Gmail OAuth is all-or-nothing in production (review finding 1)", () => {
+  it("requires the encryption key once OAuth is configured at all", () => {
+    const partial = {
+      ...deployed,
+      ...fullConfig,
+      GOOGLE_OAUTH_CLIENT_ID: "id",
+      GOOGLE_OAUTH_CLIENT_SECRET: "secret",
+      GOOGLE_OAUTH_REDIRECT_URI: "https://x/callback",
+    };
+    expect(missingProductionConfig(partial)).toEqual(["EMAIL_OAUTH_ENCRYPTION_KEY"]);
+  });
+
+  it("passes when the full OAuth set including the key is present", () => {
+    const complete = {
+      ...deployed,
+      ...fullConfig,
+      GOOGLE_OAUTH_CLIENT_ID: "id",
+      GOOGLE_OAUTH_CLIENT_SECRET: "secret",
+      GOOGLE_OAUTH_REDIRECT_URI: "https://x/callback",
+      EMAIL_OAUTH_ENCRYPTION_KEY: Buffer.alloc(32, 3).toString("base64"),
+    };
+    expect(missingProductionConfig(complete)).toEqual([]);
+  });
+
+  it("asks for nothing when OAuth is not configured at all", () => {
+    expect(missingProductionConfig({ ...deployed, ...fullConfig })).toEqual([]);
   });
 });
