@@ -29,7 +29,29 @@ Omar's actual receipt mail was not available, so every fixture in
 `receipt-adapters/fixtures.ts` is **synthetic and clearly marked as such**.
 The tests prove the adapters and dispatch behave as specified, *not* that
 any real retailer's email looks like this — validating that against genuine
-mail is the first task of a future session. Session 6 was the prior session:
+mail is the first task of a future session.
+
+**Real-browser click-through done, 2026-08-13 — no bugs found**, the first
+session here where that's true. Against a live `npm run dev` and real
+Postgres: registered a user, `GET /api/email/forwarding-address` returned
+an opaque plus-address and returned the *same* one on a second call
+(upsert, not regenerate); all three formats were delivered through the
+actual Basic-authenticated webhook and each was parsed by the expected
+adapter — `order-summary` took the labelled grand total (13.61) over the
+subtotal and kept `2 x Flat white` as quantity 2 / 700 extended / 350
+unit; `key-value` produced EGP 245.50 with **zero** line items (no phantom
+item from the total row); `pos-slip` handled an HTML-only body, took the
+total (4.53) over the subtotal, and the `<script>` tag did not survive
+into `rawPayload`. A retry returned `duplicate`, an unknown mailbox
+returned `ignored`, and wrong credentials returned 403. In the vault UI all
+three receipts showed **their own printed dates** (2026-07-04, 2026-08-12,
+2026-08-01) rather than the ingestion date — the Session 7 date fix
+confirmed live — and searching a line item ("Flat white") returned exactly
+the receipt that contained it. **Still not verified:** real Postmark, a
+real domain/DNS, and public HTTPS delivery — those need Omar and remain
+open.
+
+Session 6 was the prior session:
 **provider-neutral forwarded-email
 ingestion with a Postmark adapter is implemented and automated-test verified.**
 Each user gets a stable opaque plus-address; the Basic-authenticated webhook
