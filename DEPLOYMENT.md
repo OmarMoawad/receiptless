@@ -170,7 +170,19 @@ whole reason DEPLOYMENT.md §4 insists migrations be additive and run
 
 - **Additive migration** (new nullable column, new table) — the old code
   ignores it. Rolling back the deployment is sufficient and safe. This is
-  the only case the current release process is designed for.
+  the only case the current release process is designed for, and it is now
+  **enforced rather than hoped for**: `npm run check:migrations` fails CI
+  on `DROP COLUMN`, `DROP TABLE`, renames, `SET NOT NULL`, `ADD COLUMN
+  NOT NULL` without a default, and data-destroying statements.
+
+  > Writing this check immediately found one: `20260811201429_add_receipt_image_key`
+  > drops `Receipt.imageUrl` and adds `imageKey` in a single migration —
+  > exactly the pattern this section warns against. It is safe *only*
+  > because it predates any deployment, so no released code ever ran
+  > against the post-drop schema and there is no rollback target it could
+  > break. It sits in an explicit allowlist in the script with that
+  > reasoning attached, rather than being silently skipped. The rule had
+  > been stated and violated once already before anything enforced it.
 - **Destructive migration** (dropped or renamed column, tightened
   constraint) — the old code will break against the new schema, and
   rolling back the app alone makes things worse rather than better. The

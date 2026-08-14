@@ -43,6 +43,13 @@ jobs:
 
       - run: npm run db:migrate
 
+      # Rollback safety: DEPLOYMENT.md §7's recovery procedure is
+      # "promote the last good deployment", which only works if the
+      # previous release's code still runs against the current schema.
+      # Checked here so a destructive migration is caught at PR time
+      # rather than discovered during an incident.
+      - run: npm run check:migrations
+
       - run: npm run test
 
       # Must run before typecheck: Next.js generates its own ambient types
