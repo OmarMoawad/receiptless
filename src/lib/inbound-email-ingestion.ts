@@ -10,16 +10,38 @@ function isUniqueConflict(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "P2002";
 }
 
+/**
+ * Session 6's forward-to path: resolve the owning user from the mailbox
+ * token, then ingest. Routing happens only through the server-resolved
+ * token, never through any address the sender chose.
+ */
 export async function ingestInboundEmail(email: InboundEmail): Promise<InboundEmailIngestionResult> {
+  if (!email.mailboxToken) return { status: "unknown-mailbox" };
   const address = await prisma.inboundEmailAddress.findUnique({ where: { mailboxToken: email.mailboxToken } });
   if (!address) return { status: "unknown-mailbox" };
+  return ingestEmailForUser(address.userId, email);
+}
 
+/**
+ * The ingestion core, for a user the caller has already established.
+ *
+ * Session 9's OAuth scan enters here directly: it knows whose mailbox it
+ * is reading from the EmailConnection row, so there is no token to
+ * resolve. Extracted rather than duplicated so both connectors inherit the
+ * same idempotency, the same merchant-metadata protection, and the same
+ * trusted-clock date handling.
+ */
+export async function ingestEmailForUser(userId: string, email: InboundEmail): Promise<InboundEmailIngestionResult> {
   try {
     return await prisma.$transaction(async (tx) => {
       const delivery = await tx.inboundEmailDelivery.create({
-        data: { provider: email.provider, providerMessageId: email.providerMessageId, userId: address.userId },
+        data: { provider: email.provider, providerMessageId: email.providerMessageId, userId },
       });
-      const parsed = parseEmailReceipt(email);
+      // Our own clock, deliberately — the email's Date header is
+      // sender-controlled and is validated against this inside the parser
+      // rather than replacing it. Passing email.receivedAt here would let
+      // a spoofed header both set and authorize its own purchase date.
+      const parsed = parseEmailReceipt(email, new Date());
       const merchant = await tx.merchant.upsert({
         where: { name: parsed.merchant },
         update: {},
@@ -27,7 +49,7 @@ export async function ingestInboundEmail(email: InboundEmail): Promise<InboundEm
       });
       const receipt = await tx.receipt.create({
         data: {
-          ownerId: address.userId,
+          ownerId: userId,
           merchantId: merchant.id,
           currency: parsed.currency,
           totalMinor: parsed.totalMinor,
@@ -38,7 +60,10 @@ export async function ingestInboundEmail(email: InboundEmail): Promise<InboundEm
           items: parsed.items.length ? { create: parsed.items } : undefined,
         },
       });
-      await tx.inboundEmailDelivery.update({ where: { id: delivery.id }, data: { receiptId: receipt.id } });
+      await tx.inboundEmailDelivery.update({
+        where: { id: delivery.id },
+        data: { receiptId: receipt.id, adapterId: parsed.adapterId },
+      });
       return { status: "created" as const, receiptId: receipt.id };
     });
   } catch (error) {

@@ -22,7 +22,15 @@ describe("normalizePostmarkInbound", () => {
       from: "shop@example.com",
       subject: "Your receipt",
       text: "SHOP\nTOTAL $12.50",
+      receivedAt: null,
     });
+  });
+
+  it("parses the Date header when present, and ignores an unparseable one", () => {
+    expect(normalizePostmarkInbound(payload({ Date: "Tue, 4 Aug 2026 10:15:00 +0000" })).receivedAt).toEqual(
+      new Date("2026-08-04T10:15:00Z"),
+    );
+    expect(normalizePostmarkInbound(payload({ Date: "not a date" })).receivedAt).toBeNull();
   });
 
   it("turns HTML into bounded inert text when plain text is absent", () => {

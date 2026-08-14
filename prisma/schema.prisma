@@ -59,6 +59,7 @@ model User {
   receipts     Receipt[]
   inboundEmailAddress InboundEmailAddress?
   inboundEmailDeliveries InboundEmailDelivery[]
+  emailConnections EmailConnection[]
 }
 
 model InboundEmailAddress {
@@ -151,6 +152,48 @@ model Receipt {
   @@index([ownerId])
 }
 
+// Session 9: an OAuth-connected mailbox scanned for receipts, the second
+// email-ingestion path alongside Session 6's forward-to address. Token
+// material is stored only as one opaque AES-256-GCM blob (see
+// lib/oauth-token-crypto.ts) — never as readable columns, and never
+// returned by any route.
+model EmailConnection {
+  id                 String    @id @default(cuid())
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId             String
+  provider           String
+  // Google's stable account id, so reconnecting the same mailbox updates
+  // this row instead of creating a duplicate connection.
+  providerAccountId  String
+  providerAccountEmail String?
+  status             String    @default("pending")
+  encryptedTokenData String?
+  // Where the last scan finished, so a re-scan doesn't re-walk the whole
+  // mailbox. Gmail's internalDate of the newest message already seen.
+  lastScannedAt      DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([userId, provider, providerAccountId])
+  @@index([userId])
+}
+
+// Single-use CSRF/PKCE challenge for an OAuth connect flow. The callback
+// is an anonymous top-level redirect carrying no session, so `state` is
+// the only thing tying it back to the user who started it.
+model OAuthConnectChallenge {
+  id           String   @id @default(cuid())
+  userId       String
+  provider     String
+  state        String   @unique
+  pkceVerifier String
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+  consumedAt   DateTime?
+
+  @@index([userId])
+}
+
 model InboundEmailDelivery {
   id                String   @id @default(cuid())
   provider          String
@@ -159,6 +202,10 @@ model InboundEmailDelivery {
   userId            String
   receipt           Receipt? @relation(fields: [receiptId], references: [id], onDelete: SetNull)
   receiptId         String?  @unique
+  // Which receipt-adapters/ format adapter parsed this delivery. Ingestion
+  // metadata, deliberately kept here rather than on Receipt: it records how
+  // receiptless read the email, not anything the merchant attested.
+  adapterId         String?
   createdAt         DateTime @default(now())
 
   @@unique([provider, providerMessageId])

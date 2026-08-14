@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { isMerchantApiEnabled } from "@/lib/deployment";
 import { merchantReceiptSchema } from "@/lib/validation";
 
 /**
@@ -10,9 +11,18 @@ import { merchantReceiptSchema } from "@/lib/validation";
  * an opaque claim token in the QR/NFC payload handed to the customer — never
  * the receipt data itself. Real deployment requires per-merchant API keys
  * and rate limiting (see roadmap); this MVP endpoint is unauthenticated and
- * intended for local/demo use only.
+ * intended for local/demo use only — a constraint Session 8 turned from a
+ * comment into an actual gate (see the check below).
  */
 export async function POST(request: NextRequest) {
+  // Unauthenticated and unrate-limited: it creates receipts and claim
+  // tokens for anyone who can reach it. Off by default in any deployed
+  // environment; must be switched on explicitly. 404 rather than 403 so a
+  // disabled deployment doesn't advertise that the endpoint exists.
+  if (!isMerchantApiEnabled()) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
   const body = await request.json().catch(() => null);
   if (body === null) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
