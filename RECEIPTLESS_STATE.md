@@ -10,9 +10,17 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-> **Next action: Session 10 — one production-like vertical slice.**
-> Objective 0 is done: PRs #1-#3 are on `main`, CI is green there, and the
-> `agent/*` worktrees are gone. See "Session 10" near the end.
+> **Next action: Session 10 Part B — the production-like vertical slice.**
+> Part A (evidence and claims discipline) is done, 2026-08-14. Part B is
+> **blocked on Omar**: it needs a real Google OAuth client and a hosting
+> account, and no amount of agent work substitutes for either. See
+> "Session 10" near the end.
+>
+> Objective 0 is done: PRs #1–#4 are on `main`, verified with
+> `git merge-base --is-ancestor`, not with GitHub's MERGED label. CI run
+> [31776002762](https://github.com/OmarMoawad/receiptless/actions/runs/31776002762)
+> succeeded on `6e179d22`, checked 2026-08-14 19:05 local. The `agent/*`
+> worktrees from that stack are gone.
 
 Last updated: 2026-08-13 — **Sessions 8 and 9 done: Phase 1 is
 code-complete.** Session 8 turned `/api/merchant/receipts`'s "local/demo
@@ -24,7 +32,13 @@ Gmail OAuth receipt scanning — PKCE, `gmail.readonly` only, encrypted
 tokens, refresh with a buffer, a disconnect that deletes token material,
 and per-message failure isolation — reusing Session 6's ingestion core
 rather than duplicating it, so a receipt imports identically whichever
-path delivered it. 188 tests.
+path delivered it.
+
+**Test count corrected, 2026-08-14:** this entry said "188 tests". A real
+run at `6e179d2` reports **201 tests across 27 files**, all passing (see
+the evidence ledger below). 188 was either miscounted or counted before
+the last additions landed; either way it was carried forward unchecked,
+which is the exact habit Part A exists to stop.
 
 **What "code-complete" does not mean:** nothing is deployed, and no Google
 OAuth client exists. Both gaps need Omar (accounts, credentials), both are
@@ -1264,14 +1278,19 @@ single real OAuth integration. Every external dependency is exercised
 against a fake. More tested code on that foundation compounds risk rather
 than reducing it.
 
-### Part A — no accounts needed, can start immediately
+### Part A — no accounts needed, can start immediately (DONE, 2026-08-14)
 
-1. **Scope every evidence claim in the docs.** Replace bare "proven" and
+Both items below are done. The result is the "Evidence ledger" section
+further down, plus a corrected test count (188 → 201, the old figure was
+carried forward unchecked) and a "Next task" section that had been stale
+at Session 6 since three sessions before.
+
+1. ~~**Scope every evidence claim in the docs.**~~ Replace bare "proven" and
    "verified" with what was actually demonstrated, on what, at which
    commit — e.g. "exercised against local Postgres at `b5cc264`", not
    "proven". The CTO's point stands: an unscoped claim is weaker than a
    narrow one, because a reader cannot tell what it covers.
-2. **Attach traceable evidence.** Every status or numeric claim gets a
+2. ~~**Attach traceable evidence.**~~ Every status or numeric claim gets a
    durable link — CI run, PR, commit SHA, test log. "Green" is
    time-sensitive; record the head SHA and the timestamp it was checked.
 
@@ -1309,6 +1328,53 @@ merely deployed. A deploy that lacks these is not this session's goal:
 The Surya OCR service has no hosting story and is **out of scope here** —
 photo OCR will not work in this slice, and that is an accepted limitation
 of a deliberately narrow first deployment rather than an oversight.
+
+## Evidence ledger (Session 10 Part A, 2026-08-14)
+
+Every status claim in this file should be checkable by someone who does
+not trust it. The CTO's point in the Session 10 brief: an unscoped claim
+is *weaker* than a narrow one, because a reader cannot tell what it
+covers. "Green" and "proven" are time-sensitive and unfalsifiable
+respectively; a SHA and a run id are neither.
+
+**The standing rule for this repo:** a status or numeric claim carries
+what was demonstrated, on what, at which commit, and when it was checked.
+If it cannot carry that, it is written as unverified.
+
+### What is verified, and exactly how far
+
+| Claim | Evidence | Scope — what it does *not* cover |
+| --- | --- | --- |
+| Test suite passes | **201 tests, 27 files, 0 failures.** `npm test` on branch `agent/session-10-evidence`, base `6e179d2`, run 2026-08-14 19:07–19:08 local, against local Postgres 16 on `localhost:5433` from `docker-compose.yml`. | Local machine only. Synthetic fixtures throughout. Says nothing about real Gmail, real Postmark, or any deployed environment. |
+| CI is green on `main` | Run [31776002762](https://github.com/OmarMoawad/receiptless/actions/runs/31776002762), conclusion `success`, head `6e179d22`, checked 2026-08-14 19:05 local. | A point-in-time observation of one run on one SHA. Not a claim about `main` at any later commit. |
+| Phase 1 stack is on `main` | PRs [#1](https://github.com/OmarMoawad/receiptless/pull/1), [#2](https://github.com/OmarMoawad/receiptless/pull/2), [#3](https://github.com/OmarMoawad/receiptless/pull/3), [#4](https://github.com/OmarMoawad/receiptless/pull/4) — all merged; `main` at `6e179d22d4162a81ea4ccbc88fa24730daae0260`, 2026-08-14 09:21:28 +0300. | Verified by ancestry, **not** by GitHub's `MERGED` label — that label lied about this exact stack once already (see Objective 0). |
+| Email ingestion works | Automated tests against hand-written fixtures. | **No real Postmark account, domain, or inbound webhook has ever delivered a message to this code.** |
+| Gmail OAuth scanning works | Automated tests against a fake API client. | **No Google OAuth client exists.** Nothing in this path has met Google's real API. |
+| Surya OCR beats Tesseract | One real-browser click-through on one real Kohl's receipt, session 5 follow-up. | A single receipt, one engine comparison, one machine. Not an accuracy benchmark. |
+
+### Not verified, and not claimed to be
+
+- **Nothing is deployed.** `vercel.json`, `/api/health`, and
+  `DEPLOYMENT.md` have never met real infrastructure. The rollback
+  procedure is written and **not rehearsed**.
+- **No secrets management exists** beyond a local `.env`.
+- **No observability**: no error tracking, no log drain.
+- **The OCR service has no hosting story** — out of scope for the first
+  slice, by decision, not by oversight.
+
+### A worked example of why this matters, from today
+
+At 18:55 a full run of this suite reported **76 failures across 17
+files**. Nothing was wrong with the code. A benchmark running in the other
+repo had exhausted this 8 GB machine's memory and killed the Docker
+daemon, taking Postgres with it; every failure was `ECONNREFUSED` on
+`5433` wearing a Prisma stack trace. Restarted, the same tree at the same
+commit ran 201/201 green.
+
+Had "76 failures" been recorded as a result rather than investigated, it
+would have entered this file as a regression that never existed. This is
+the second-order reason the ledger names its conditions: a number without
+its environment is not a measurement.
 
 ## Session cadence for Phase 2 — re-baselined 2026-08-13
 
@@ -1375,25 +1441,28 @@ env-gate on top of that before any public deployment.
 
 ## Next task
 
-**Session 6 — Email ingestion, path A: forward-to address.** The
-real-browser click-through of the Surya-based OCR flow (see "Completed
-components (Session 5 follow-up)" above) is now done — Surya's own
-accuracy on Omar's real Kohl's receipt was confirmed dramatically better
-than Tesseract's, and the one real bug it found (a "Total Saved"
-discount line beating the real total) is fixed and regression-tested.
-Two things worth keeping in mind before a real deploy, not blocking
-Session 6: OCR requests take 1-3 minutes on this machine's CPU-only
-inference with no progress indicator in the UI, and the merchant-name
-heuristic still gets fooled by receipts that don't print the brand name
-as their literal first line (a "first-line" heuristic limit, not an OCR
-one).
+**Session 10 Part B — the production-like vertical slice. Blocked on
+Omar.** Part A is done (see the evidence ledger above); Part B cannot
+start without accounts only Omar can create:
 
-See "Session cadence" above for Session 6's full scope: a per-user
-forward-to address plus a webhook that receives inbound mail and parses
-it into a `Receipt` at `VerificationLevel.IMPORTED`. **Needs Omar**:
-owning a domain and
-picking an inbound-email provider (SendGrid Inbound Parse, Postmark,
-Mailgun, Cloudflare Email Routing) — flag this and get his choice before
-writing provider-specific code; build the webhook handler against a
-documented payload contract so the provider choice stays swappable
-either way.
+1. **A real Google OAuth client.** The highest-leverage credential in
+   either repo — one client unblocks this repo's Gmail scanner *and*
+   IDent's Gmail/Calendar sync. Until it exists the second ingestion path
+   is theory with tests around it.
+2. **A hosting target**: Vercel project plus hosted Postgres, per
+   `DEPLOYMENT.md`.
+3. **An inbound-email provider decision** (SendGrid Inbound Parse,
+   Postmark, Mailgun, Cloudflare Email Routing) plus a domain. Session 6
+   built the webhook against a documented payload contract precisely so
+   this choice stays swappable — but it still has to be made.
+
+The exit criteria are listed under "Session 10" above and are **all of
+them, not a subset**: real identity and OAuth, secret management,
+observability, a *rehearsed* rollback, readiness checks against the real
+database, and migrations run as a release step.
+
+**This section was stale until 2026-08-14.** It still read "Session 6 —
+Email ingestion, path A" long after sessions 6 through 9 had shipped, so
+a cold read of this file got a next-action three sessions behind the
+header at the top. That is precisely the resumability bug the top of this
+file says is a bug. Whoever finishes a session updates *both* ends.
