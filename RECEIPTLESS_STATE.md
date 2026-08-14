@@ -10,11 +10,14 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-> **Next action: Session 10 Part B — the production-like vertical slice.**
-> Part A (evidence and claims discipline) is done, 2026-08-14. Part B is
-> **blocked on Omar**: it needs a real Google OAuth client and a hosting
-> account, and no amount of agent work substitutes for either. See
-> "Session 10" near the end.
+> **Next action: Session 10 Part B — create the accounts, then deploy.**
+> Part A is done (2026-08-14). Part B's *code* half is done (2026-08-15):
+> error tracking, a rollback procedure, and a verification script all
+> exist and are exercised locally. What remains is the half that needs
+> accounts — Neon, Cloudflare R2, Vercel, Google Cloud, Sentry — and only
+> Omar can create those. The runbook is `DEPLOYMENT.md`; hand back the
+> production URL and `node scripts/verify-deployment.mjs <url>` checks the
+> exit criteria. See "Session 10 Part B progress" below.
 >
 > Objective 0 is done: PRs #1–#4 are on `main`, verified with
 > `git merge-base --is-ancestor`, not with GitHub's MERGED label. CI run
@@ -1375,6 +1378,98 @@ Had "76 failures" been recorded as a result rather than investigated, it
 would have entered this file as a regression that never existed. This is
 the second-order reason the ledger names its conditions: a number without
 its environment is not a measurement.
+
+## Session 10 Part B progress (2026-08-15) — code half done, accounts pending
+
+Providers chosen with Omar, 2026-08-15: **Neon** (Postgres, branching
+suits per-preview databases), **Cloudflare R2** (object storage, no egress
+fees on receipt images), **Sentry** (error tracking). Inbound email stays
+deliberately out of this slice — it needs a domain, and Session 10's point
+is *one* path working end to end.
+
+### Done, and exercised
+
+**Error tracking (`src/lib/observability.ts`).** The wiring is the small
+part; the scrubbing is the point. This app holds purchase history, so
+Sentry's defaults — request bodies, cookies, headers, query strings — are
+all unacceptable unfiltered. The posture is deny-by-default: bodies and
+cookies deleted outright, headers **allowlisted** to three, query values
+replaced with `<redacted>` while keeping key names, users reduced to an
+opaque id with email and IP dropped, breadcrumbs redacted, and
+`sendDefaultPii: false` asserted in a test rather than left to a library
+default. Session Replay is deliberately **not** enabled: it captures the
+rendered DOM, so it would record the receipt vault itself and no
+event-level scrubbing would help. 18 tests cover the scrubber.
+
+The SDK is inert without a DSN and disabled outside deployed environments,
+so local development and CI never post to a shared tracker.
+
+**Readiness reports observability.** `/api/health` now carries
+`errorTrackingEnabled`. It deliberately does *not* fail readiness on it —
+a deployment without error tracking is worse-operated, not unsafe to
+serve, and conflating those would 503 every fork and preview.
+
+**Verification script (`scripts/verify-deployment.mjs`).** Twelve
+automated checks against a live deployment: readiness shape, database
+reachability, the encryption-key gate, missing config, merchant endpoint
+returning 404 *from outside*, error tracking active, HTTPS and HSTS, and
+that the endpoint leaks no configuration values. It prints the four checks
+it **cannot** make from outside — backups, log drain, real consent,
+rollback rehearsal — so a green run never quietly means "verified except
+the hard parts".
+
+**Rehearsed locally against a production-mode build**, 2026-08-15, base
+`0caae7c`, `VERCEL_ENV=production` on `localhost:3100` against local
+Postgres:
+
+- With the committed dev key: `insecureConfig: ["EMAIL_OAUTH_ENCRYPTION_KEY"]`,
+  HTTP 503. **The gate fires.** This is the exit criterion about the
+  encryption key, demonstrated rather than asserted.
+- Fully configured: `status: "ok"`, both arrays empty,
+  `merchantApiEnabled: false`, `errorTrackingEnabled: true`, HTTP 200.
+- `verify-deployment.mjs` then passed 10/12; the two failures were HTTPS
+  and HSTS, correct for `http://localhost` and expected to pass on Vercel.
+
+**Rollback procedure written and made rehearsable** (`DEPLOYMENT.md` §7),
+including the part that matters more than the button: promoting an old
+build does **not** roll back a migration. Additive migrations are safe to
+roll back under; destructive ones are not, and the fix is splitting them
+across two releases rather than improvising a down-migration during an
+incident.
+
+### Two things the rehearsal found
+
+- **The Gmail variables are one all-or-nothing group, and the encryption
+  key is in it.** Setting only `EMAIL_OAUTH_ENCRYPTION_KEY` — the natural
+  first move, since it is the one you generate yourself — makes
+  `/api/health` 503 listing the three Google variables as missing. Correct
+  behaviour, confusing symptom; now called out in DEPLOYMENT.md.
+- **The Gmail OAuth start route is a POST, not a GET.** The first draft of
+  the verification script sent GET, got 405, and counted it as a pass —
+  which would have hidden a genuinely broken route. Fixed.
+
+### Not done — needs Omar, and not claimed otherwise
+
+1. **Accounts**: Neon, Cloudflare R2, Vercel, Google Cloud OAuth client,
+   Sentry. Step-by-step in `DEPLOYMENT.md` and the setup runbook. I cannot
+   create accounts, accept terms, or enter credentials.
+2. **Nothing is deployed.** Every claim above is from a local
+   production-mode build. `vercel.json` and `/api/health` still have not
+   met real infrastructure.
+3. **Rollback is rehearsable but NOT rehearsed.** The criterion says
+   *rehearsed at least once*, so it is **not met** until the state file
+   records two SHAs and an elapsed recovery time. Do it while the database
+   is still empty and a mistake costs nothing.
+4. **Backups/PITR unconfirmed** — check Neon's retention window before
+   real receipts exist, per the hard gate below.
+5. **The real slice is unproven**: no Google account has completed
+   consent, and no real receipt has landed in the vault from a real
+   mailbox.
+
+**Verified this session:** 219 tests across 28 files, all passing (201 →
+219 with the observability suite), typecheck clean, `next build` clean
+with the Sentry wrapper, on branch `agent/session-10-part-b`, base
+`0caae7c`, 2026-08-15 against local Postgres 16 on `localhost:5433`.
 
 ## Session cadence for Phase 2 — re-baselined 2026-08-13
 
