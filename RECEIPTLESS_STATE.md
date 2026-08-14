@@ -10,7 +10,36 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-Last updated: 2026-08-13 — **Session 7: format-keyed receipt parser
+> **Next action: Objective 0 — land the review stack.** Three PRs are open
+> and `main` is fifteen commits behind. Everything else in this file is
+> blocked on that. See "Objective 0" near the end for the per-PR review
+> guide and merge order.
+
+Last updated: 2026-08-13 — **Sessions 8 and 9 done: Phase 1 is
+code-complete.** Session 8 turned `/api/merchant/receipts`'s "local/demo
+only" doc comment into a real gate (off by default in any deployed
+environment, Vercel previews included, failing closed on anything but the
+exact string `true`), and prepared `vercel.json`, a value-free
+`/api/health` readiness endpoint, and `DEPLOYMENT.md`. Session 9 added
+Gmail OAuth receipt scanning — PKCE, `gmail.readonly` only, encrypted
+tokens, refresh with a buffer, a disconnect that deletes token material,
+and per-message failure isolation — reusing Session 6's ingestion core
+rather than duplicating it, so a receipt imports identically whichever
+path delivered it. 188 tests.
+
+**What "code-complete" does not mean:** nothing is deployed, and no Google
+OAuth client exists. Both gaps need Omar (accounts, credentials), both are
+marked in the cadence below, and neither session is claimed as verified
+against real infrastructure. Phase 2's cadence is re-baselined at the end
+of this file.
+
+Also fixed a long-running annoyance: vitest is capped at 4 workers now.
+The suite shares one Postgres, and above that, unrelated tenant-isolation
+and auth tests fail on connection contention during full runs while
+passing in isolation — misread as a regression more than once, including
+by a reviewer.
+
+Previously — **Session 7: format-keyed receipt parser
 adapters are implemented and automated-test verified.** Email parsing now
 runs through a registry (`src/lib/receipt-adapters/`) that picks a parser
 from the email's *structure* — an itemized order summary, a labelled
@@ -1086,7 +1115,21 @@ gaps.
    adding more beside them. A brand-specific adapter, if one is ever
    genuinely needed, goes at the *front* of `registry.ts`'s array.
 
-8. **Hosting: Vercel + hosted Postgres.** Not first despite ROADMAP.md
+8. ~~**Hosting: Vercel + hosted Postgres.**~~ Code-side prep done
+   2026-08-13; **the accounts themselves still need Omar**, so nothing has
+   been deployed and nothing here is verified against real hosting. Built:
+   `vercel.json` (migrations run in the build, security headers),
+   `src/lib/deployment.ts`, an `/api/health` readiness endpoint that lists
+   every missing config key at once without exposing a single value, and
+   `DEPLOYMENT.md` as the runbook. The important part is the gate the
+   original entry asked for: `/api/merchant/receipts` is unauthenticated
+   and unrate-limited, and its "local/demo only" status was just a doc
+   comment — it is now **off by default in any deployed environment**
+   (Vercel previews included, since those are public too), returns 404
+   rather than advertising itself, and fails closed on anything other than
+   the exact string `true`. Original scope follows.
+
+   **Hosting: Vercel + hosted Postgres.** Not first despite ROADMAP.md
    listing it first — see the hard gate below for why: no real account
    exists to protect until Session 2, and no real data should reach a
    public deployment before secrets management and backups exist for that
@@ -1104,7 +1147,25 @@ gaps.
    code-side first (`vercel.json`, env var wiring, the merchant-endpoint
    gate, deploy docs) so the session is short once those accounts exist.
 
-9. **Email ingestion, path B: Gmail/Outlook OAuth scan.** The second half
+9. ~~**Email ingestion, path B: Gmail/Outlook OAuth scan.**~~ Done
+   2026-08-13 for Gmail. OAuth connect with PKCE and `gmail.readonly`
+   scope only, AES-256-GCM token storage in one opaque column, refresh
+   with a buffer, and a disconnect that clears token material outright
+   rather than flipping a status. Scanned mail reuses the *existing*
+   pipeline — `ingestEmailForUser` was extracted from Session 6's
+   webhook path so both connectors share idempotency, merchant-metadata
+   protection, and trusted-clock dating, and `htmlToText` moved to its own
+   module so both flatten HTML identically. All three tests the original
+   entry asked for are covered: token refresh (including refresh-token
+   rotation and no-rotation), a disconnected account no longer being
+   scanned, and per-message failure isolation. **Not verified against real
+   Google credentials** — no OAuth client exists yet, so everything is
+   tested against a fake API client, and the redirect URI currently points
+   at localhost since Session 8's hosting doesn't exist either. Outlook is
+   not built; the connector interface is Gmail-shaped but the ingestion
+   core it feeds is provider-neutral. Original scope follows.
+
+   **Email ingestion, path B: Gmail/Outlook OAuth scan.** The second half
    of Phase 1's stated email-ingestion scope (ROADMAP.md), deliberately
    sequenced after Session 6's simpler forward-to-address path lands and
    after Session 8's hosting exists (OAuth redirect URIs need a real,
@@ -1118,6 +1179,128 @@ gaps.
 Phase 1 is functionally complete once Session 9 ships. Re-baseline after
 that — Phase 2 (real search, warranty/return UI, export) becomes the next
 cadence.
+
+**Phase 1 is now code-complete (2026-08-13).** Two real-world gaps remain
+and neither is a coding task: no deployment exists (Session 8's accounts
+need Omar) and no Google OAuth client exists (Session 9's credentials need
+Omar). Both sessions are built and tested up to exactly the line where a
+real account is required, and neither is claimed as verified against real
+infrastructure.
+
+## Objective 0 — land the review stack (BLOCKS EVERYTHING BELOW)
+
+**This is the first thing to work on. Nothing else starts until it is
+done.** Three PRs are open and `main` is fifteen commits behind. Nothing
+here is finished while it lives in a branch, and every day the stack sits
+it drifts further from `main` and from itself.
+
+Needs Omar's review; needs no accounts, no credentials, and no
+infrastructure.
+
+### Merge in order — each is based on its predecessor, not on `main`
+
+| PR | Focus of review | Est. |
+| --- | --- | --- |
+| [#1](https://github.com/OmarMoawad/receiptless/pull/1) — forwarded-email ingestion | The opaque plus-address scheme and how a delivery is routed to an owner | ~10 min |
+| [#2](https://github.com/OmarMoawad/receiptless/pull/2) — parser adapters | **Carries a security fix.** The email `Date` header was being used as the clock that validated dates, so a spoofed header authorised itself. Check the trusted-clock split in `receipt-adapters/registry.ts` | ~15 min |
+| [#3](https://github.com/OmarMoawad/receiptless/pull/3) — hosting prep + Gmail scan | **Read this one closely.** Carries the committed-encryption-key fix. The question worth answering: does the readiness gate in `deployment.ts` cover *every* path a deploy could take to reach `oauth-token-crypto.ts`? | ~25 min |
+
+Merging out of order will create conflicts, because each branch is based on
+the one before it rather than on `main`.
+
+### Done when
+
+- All three are merged and `main` contains them
+- CI is green **on `main`**, not only on the branches
+- The merged `agent/*` branches and their worktrees are deleted
+- `docs/progress.svg` regenerated from `main`
+
+## Session 10 — one production-like vertical slice (after Objective 0)
+
+Inserted ahead of the Phase 2 cadence below on CTO review, 2026-08-13. The
+instruction was explicit: **pause new surface area until one production-like
+vertical slice is exercised.** Phase 2's five sessions do not start until
+this one is done.
+
+The reasoning is hard to argue with. This repo has accumulated 200 tests
+and nine sessions of features without a production-like environment or a
+single real OAuth integration. Every external dependency is exercised
+against a fake. More tested code on that foundation compounds risk rather
+than reducing it.
+
+### Part A — no accounts needed, can start immediately
+
+1. **Scope every evidence claim in the docs.** Replace bare "proven" and
+   "verified" with what was actually demonstrated, on what, at which
+   commit — e.g. "exercised against local Postgres at `b5cc264`", not
+   "proven". The CTO's point stands: an unscoped claim is weaker than a
+   narrow one, because a reader cannot tell what it covers.
+2. **Attach traceable evidence.** Every status or numeric claim gets a
+   durable link — CI run, PR, commit SHA, test log. "Green" is
+   time-sensitive; record the head SHA and the timestamp it was checked.
+
+### Part B — needs Omar's accounts
+
+3. **Real Google OAuth client.** Highest-leverage credential in either
+   repo: one client unblocks this repo's Gmail scanner *and* IDent's Gmail
+   and Calendar sync. Until it exists, the second ingestion path is
+   theory.
+4. **Deploy.** Vercel project plus hosted Postgres, per DEPLOYMENT.md. The
+   runbook, `vercel.json`, and `/api/health` are written and have never met
+   real infrastructure.
+5. **The slice itself, end to end with real data:** connect a real Gmail
+   account → scan → a real receipt lands in the vault → it is searchable.
+   One path, working in production, beats five more sessions of code.
+
+### Exit criteria — all of these, not a subset
+
+The CTO named the pieces that make a slice "production-like" rather than
+merely deployed. A deploy that lacks these is not this session's goal:
+
+- **Real identity and OAuth** — a genuine Google account, not a fake client
+- **Secret management** — no secrets in the repo or in build logs; the
+  `EMAIL_OAUTH_ENCRYPTION_KEY` gate verified against the real environment
+- **Observability** — error tracking and a log drain, so a production
+  failure is visible without SSH
+- **Rollback** — documented *and rehearsed at least once*, not just written
+- **Readiness checks** — `/api/health` exercised against the real database
+  and returning the expected shape
+- **Migration procedure** — run as a release step against the real
+  database, since migrations were deliberately taken out of the build
+
+### Deliberately still open
+
+The Surya OCR service has no hosting story and is **out of scope here** —
+photo OCR will not work in this slice, and that is an accepted limitation
+of a deliberately narrow first deployment rather than an oversight.
+
+## Session cadence for Phase 2 — re-baselined 2026-08-13
+
+Phase 2 is "vault maturity" (ROADMAP.md): making what's already captured
+genuinely useful, rather than capturing more of it. Ordered so each
+session stands alone, and deliberately so that none depends on the two
+open real-world gaps above — progress here isn't blocked on account
+creation.
+
+1. **Real search.** Postgres full-text over merchant, item names, and
+   notes, replacing today's `ILIKE` in `/api/search`. Ranking, and a
+   search UI that shows *why* a receipt matched. Semantic search is
+   explicitly out of scope — revisit once full-text is real and there's a
+   concrete reason to want more.
+2. **Warranty and return windows, surfaced.** The schema already carries
+   this metadata and nothing displays it. A "still under warranty" and
+   "returnable until" view, plus per-receipt entry — the most direct
+   answer to ROADMAP.md's own "I need to return this" use case.
+3. **Export: CSV and PDF.** Owner-scoped and streamed rather than built in
+   memory. CSV first (mechanical); PDF second, and it needs a rendering
+   choice — flag that rather than picking one silently.
+4. **Tax-category tagging.** Per-receipt and per-item categories with a
+   rules layer, feeding an exportable tax summary. Builds on
+   `lib/categories.ts`.
+5. **Multi-currency with historical FX.** Store the rate used at purchase
+   time; never convert on read with today's rate. **Needs Omar**: an FX
+   rate source — most free tiers forbid commercial use, the same licensing
+   trap already logged below for the Surya OCR weights.
 
 ## Known open decisions
 
