@@ -125,6 +125,18 @@ npm run test
 npm run build
 ```
 
+**Last verified:** 201 tests across 27 files, all passing, at base
+`6e179d2` on 2026-08-14 against local Postgres 16 on `localhost:5433`.
+CI run
+[31776002762](https://github.com/OmarMoawad/receiptless/actions/runs/31776002762)
+succeeded on `main` at `6e179d22`, checked 2026-08-14.
+
+That figure is scoped deliberately: it covers this repo's own logic
+against a local database and synthetic fixtures. It does **not** cover
+real Gmail, real Postmark, or any deployed environment — see the evidence
+ledger in RECEIPTLESS_STATE.md for what each claim does and does not
+reach.
+
 ## Data model
 
 `Merchant` → `Receipt` → `ReceiptItem`, with money always stored as integer
