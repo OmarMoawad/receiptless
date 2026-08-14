@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { insecureProductionConfig, isMerchantApiEnabled, missingProductionConfig } from "@/lib/deployment";
+import { sentryEnabled } from "@/lib/observability";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,15 @@ export async function GET() {
       missingConfig,
       insecureConfig,
       merchantApiEnabled: isMerchantApiEnabled(),
+      // Session 10 Part B: observability is an exit criterion, so it is
+      // reportable rather than something you confirm by squinting at a
+      // dashboard. A boolean only — never the DSN, which is configuration
+      // and this endpoint is unauthenticated.
+      //
+      // Deliberately does NOT fail readiness: a deployment with no error
+      // tracking is worse-operated, not unsafe to serve, and conflating
+      // the two would make /api/health 503 on every fork and preview.
+      errorTrackingEnabled: sentryEnabled(),
       timestamp: new Date().toISOString(),
     },
     { status: ready ? 200 : 503 },
