@@ -15,10 +15,29 @@ environment. Nothing below removes that gate — it makes it checkable.
 
 ## 1. Create the accounts (needs Omar)
 
-1. **Hosted Postgres** — Neon, Supabase, or Vercel Postgres. Any is fine;
-   Neon's branching is the most useful for preview deployments, since each
-   preview can get its own database branch instead of sharing production's.
-   Copy the pooled connection string.
+1. **Hosted Postgres** — Neon (chosen 2026-08-15). Branching is the most
+   useful part for previews: each preview can get its own database branch
+   instead of sharing production's. Copy the **pooled** connection string.
+
+   Three things that went wrong the first time through, all worth getting
+   right while the database is still empty:
+
+   - **Take the pooled string, not the direct one.** The dashboard shows
+     the direct endpoint by default; the pooled host has a `-pooler`
+     segment (`ep-xxx-pooler.<region>.aws.neon.tech`). Vercel's functions
+     open a connection per invocation and will exhaust the direct
+     endpoint's limit.
+   - **Pick the region deliberately.** Neon's default is not necessarily
+     near you — the first attempt landed in `sa-east-1` (São Paulo) for a
+     user in Cairo. Recreating an empty project is free; migrating a
+     populated one is not.
+   - **Do not run `npx neonctl@latest init` in this repo.** It writes the
+     production `DATABASE_URL` into `.env`, and this repo's test suite is
+     destructive against whatever `DATABASE_URL` names. `npm test` would
+     then delete production data. `src/test/guard-local-database.ts` now
+     refuses to run in that situation, but the simplest answer is to paste
+     the string into Vercel and leave `.env` pointed at the local
+     container.
 2. **Vercel project** — import the GitHub repo. Framework preset is
    detected from `vercel.json` (Next.js).
 3. **Object storage** — a real S3 or R2 bucket, replacing local MinIO. R2
