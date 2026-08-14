@@ -46,6 +46,27 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+### Forwarded receipt email (Session 6)
+
+Set `POSTMARK_INBOUND_ADDRESS` to the inbound address assigned by Postmark
+and choose strong `POSTMARK_WEBHOOK_USERNAME` / `POSTMARK_WEBHOOK_PASSWORD`
+values. A signed-in user can call `GET /api/email/forwarding-address` to get
+their opaque plus-address. Configure Postmark's inbound webhook as:
+
+```text
+https://<username>:<password>@<your-host>/api/webhooks/email/postmark
+```
+
+For a branded address, configure Postmark inbound-domain forwarding or DNS
+forwarding to the assigned address. Postmark documents HTTP Basic Auth plus
+optional IP allowlisting as its webhook protection; use HTTPS and add the
+current Postmark IP ranges at the deployment firewall when available.
+
+The webhook imports text/HTML bodies idempotently as owner-scoped `EMAIL` /
+`IMPORTED` receipts. It ignores attachments and never treats email as
+merchant-verified. A real Postmark account, domain, public HTTPS deployment,
+and end-to-end delivery click-through are still required before production.
+
 ## Checks (same as CI)
 
 ```bash
@@ -94,18 +115,18 @@ the merchant API — see `src/lib/parseReceipt.ts`.
 - `src/app/api/claim/[token]` — claim-token resolution API
 - `src/app/api/search` — vault search
 - `src/app/api/reports` — monthly/annual aggregation
+- `src/app/api/email/forwarding-address` — authenticated per-user forwarding address
+- `src/app/api/webhooks/email/postmark` — Basic-authenticated inbound email webhook
 - `src/lib/validation.ts` — Zod schemas for every write path
 - `src/lib/money.ts` — minor-unit money helpers
 - `prisma/schema.prisma` — `Merchant` / `Receipt` / `ReceiptItem` models
 
 ## Notes
 
-- Receipt photos are currently stored inline as data URLs for MVP simplicity;
-  Phase 1 of the roadmap moves this to object storage (S3/R2).
-- Accounts exist (`POST /api/auth/{register,login,logout}`,
-  `GET /api/auth/me`, cookie-based sessions) but nothing is scoped to a
-  user yet — every receipt still lives in one shared vault regardless of
-  who's logged in. That scoping is its own next step (RECEIPTLESS_STATE.md).
+- Receipt photos use private S3-compatible object storage and owner-scoped
+  signed access; local development uses MinIO.
+- Accounts and every vault/read/report/photo path are owner-scoped through
+  cookie-based sessions.
 - `/api/merchant/receipts` is unauthenticated and meant for local/demo use —
   Phase 3 adds real merchant API keys before this is exposed publicly. It
   intentionally marks everything it creates `UNVERIFIED`, not
