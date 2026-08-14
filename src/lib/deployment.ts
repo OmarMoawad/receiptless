@@ -1,4 +1,4 @@
-import { InsecureEncryptionKeyError, resolveEncryptionKey } from "./oauth-token-crypto";
+import { resolveEncryptionKey } from "./oauth-token-crypto";
 
 /**
  * Session 8 (RECEIPTLESS_STATE.md): deployment-environment gates.
@@ -81,15 +81,26 @@ export function missingProductionConfig(env: NodeJS.ProcessEnv = process.env): s
  * Configuration that is present but *unsafe*, as distinct from absent.
  * Reported separately so a deployment can say "this key is the public dev
  * key" rather than the misleading "this key is missing".
+ *
+ * Every way `resolveEncryptionKey` can reject a key is reported, not only
+ * the insecure-key case. An earlier version rethrew anything that was not
+ * an `InsecureEncryptionKeyError`, so a wrong-length key — an ordinary
+ * operator typo, and exactly the class of mistake this endpoint exists to
+ * diagnose — escaped as a 500 from `/api/health` instead of the
+ * 503-with-a-key-name that tells the operator what to fix. The endpoint
+ * that reports misconfiguration must not be the one thing misconfiguration
+ * takes down.
  */
 export function insecureProductionConfig(env: NodeJS.ProcessEnv = process.env): string[] {
   if (!isDeployedEnvironment(env)) return [];
   const problems: string[] = [];
   try {
     resolveEncryptionKey(env);
-  } catch (error) {
-    if (error instanceof InsecureEncryptionKeyError) problems.push("EMAIL_OAUTH_ENCRYPTION_KEY");
-    else throw error;
+  } catch {
+    // Only the key name, never the value or the thrown message — this
+    // endpoint is unauthenticated (see the route), so the specific reason
+    // stays server-side.
+    problems.push("EMAIL_OAUTH_ENCRYPTION_KEY");
   }
   return problems;
 }

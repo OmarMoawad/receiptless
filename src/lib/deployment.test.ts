@@ -130,6 +130,25 @@ describe("OAuth encryption key (review finding 1)", () => {
     // Local dev is never "insecure" — the dev key is legitimate there.
     expect(insecureProductionConfig(local)).toEqual([]);
   });
+
+  // Objective 0 review, 2026-08-14. A wrong-length key is the likeliest
+  // operator typo of the three failure modes, and it was the one that took
+  // the health endpoint down instead of being reported by it:
+  // insecureProductionConfig rethrew every error that was not an
+  // InsecureEncryptionKeyError, so GET /api/health answered 500 with no
+  // key name rather than 503 naming the key. Readiness must report a bad
+  // key the same way it reports a missing or public one.
+  it("reports a wrong-length key rather than throwing out of the health check", () => {
+    const shortKey = Buffer.alloc(16, 7).toString("base64");
+    expect(() => insecureProductionConfig({ ...deployed, EMAIL_OAUTH_ENCRYPTION_KEY: shortKey })).not.toThrow();
+    expect(insecureProductionConfig({ ...deployed, EMAIL_OAUTH_ENCRYPTION_KEY: shortKey })).toEqual([
+      "EMAIL_OAUTH_ENCRYPTION_KEY",
+    ]);
+    // Undecodable base64 is the same class of mistake, and must behave the same.
+    expect(insecureProductionConfig({ ...deployed, EMAIL_OAUTH_ENCRYPTION_KEY: "!!!not-base64!!!" })).toEqual([
+      "EMAIL_OAUTH_ENCRYPTION_KEY",
+    ]);
+  });
 });
 
 describe("Gmail OAuth is all-or-nothing in production (review finding 1)", () => {
