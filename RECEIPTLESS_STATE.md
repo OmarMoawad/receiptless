@@ -10,10 +10,9 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-> **Next action: Objective 0 — land the review stack.** Three PRs are open
-> and `main` is fifteen commits behind. Everything else in this file is
-> blocked on that. See "Objective 0" near the end for the per-PR review
-> guide and merge order.
+> **Next action: Session 10 — one production-like vertical slice.**
+> Objective 0 is done: PRs #1-#3 are on `main`, CI is green there, and the
+> `agent/*` worktrees are gone. See "Session 10" near the end.
 
 Last updated: 2026-08-13 — **Sessions 8 and 9 done: Phase 1 is
 code-complete.** Session 8 turned `/api/merchant/receipts`'s "local/demo
@@ -1187,15 +1186,48 @@ Omar). Both sessions are built and tested up to exactly the line where a
 real account is required, and neither is claimed as verified against real
 infrastructure.
 
-## Objective 0 — land the review stack (BLOCKS EVERYTHING BELOW)
+## Objective 0 — land the review stack (DONE, 2026-08-14)
 
-**This is the first thing to work on. Nothing else starts until it is
-done.** Three PRs are open and `main` is fifteen commits behind. Nothing
-here is finished while it lives in a branch, and every day the stack sits
-it drifts further from `main` and from itself.
+Sessions 6-9 are on `main` at `ec77974`, CI green. Kept here rather than
+deleted, for the merge lesson below.
 
-Needs Omar's review; needs no accounts, no credentials, and no
-infrastructure.
+**A stacked merge does not do what the merge order implies.** All three
+PRs were merged within eight seconds of each other and GitHub reported all
+three as `MERGED` — while `main` contained only #1. GitHub retargets a
+stacked PR's base to `main` only when the previous base branch is
+*deleted*, and that is asynchronous, so #2 merged into
+`agent/forwarded-email-ingestion` and #3 into
+`agent/retailer-parser-adapters`: each one level up the stack, exactly as
+its base said. Nothing was lost — the cascade left
+`agent/retailer-parser-adapters` holding every PR head — and `main` was
+repaired by merging that branch directly (`ec77974`), whose tree was
+verified identical to it beforehand.
+
+**Next time, either** delete each base branch and wait for GitHub to
+retarget the next PR before merging it, **or** skip the ceremony and merge
+the top of the stack into `main` once. The failure is quiet: eight green
+merged PRs, a `main` that is missing almost all of them, and a progress
+badge still reporting the pre-stack number.
+
+### Review findings, since this is where the stack was reviewed
+
+- The question this file posed on PR #3 — does the readiness gate in
+  `deployment.ts` cover every path to `oauth-token-crypto.ts`? — is
+  answered **yes, and the gate is not what does the work**:
+  `resolveEncryptionKey` fails closed at the point of use, so no path
+  encrypts a real refresh token under the committed dev key even if
+  `/api/health` is never called.
+- One real bug found and fixed (`e60702d`): `insecureProductionConfig`
+  rethrew anything that was not an `InsecureEncryptionKeyError`, so a
+  wrong-length key — the likeliest operator typo — made `/api/health`
+  answer 500 with no key name instead of the 503 naming the key. The
+  endpoint that diagnoses misconfiguration was the one thing a
+  misconfiguration took down.
+- Residual assumption, not a bug: `isDeployedEnvironment` is
+  `VERCEL_ENV || NODE_ENV === "production"`. That covers Vercel and
+  `next start`. A self-hosted deploy setting neither would be treated as
+  local and would use the committed key. State this in DEPLOYMENT.md if
+  the hosting target ever stops being Vercel.
 
 ### Merge in order — each is based on its predecessor, not on `main`
 
@@ -1208,12 +1240,16 @@ infrastructure.
 Merging out of order will create conflicts, because each branch is based on
 the one before it rather than on `main`.
 
-### Done when
+### Done when — all met except one
 
-- All three are merged and `main` contains them
-- CI is green **on `main`**, not only on the branches
-- The merged `agent/*` branches and their worktrees are deleted
-- `docs/progress.svg` regenerated from `main`
+- [x] All three merged and `main` contains them — verified by ancestry,
+      not by GitHub's `MERGED` label, which was wrong here
+- [x] CI green **on `main`** (`ec77974`)
+- [x] Worktrees and local branches deleted
+- [ ] **The three remote `agent/*` branches still exist** — deleting them
+      needs Omar; the agent's permissions stop at local deletion
+- [x] `docs/progress.svg` regenerated from `main` — already current at
+      22%, no diff
 
 ## Session 10 — one production-like vertical slice (after Objective 0)
 
