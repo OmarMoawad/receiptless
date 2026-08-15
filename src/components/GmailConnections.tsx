@@ -41,7 +41,13 @@ type ScanResult = {
 /** The callback's own redirect vocabulary — see the gmail/callback route. */
 const CALLBACK_MESSAGES: Record<string, { tone: "ok" | "error"; text: string }> = {
   connected: { tone: "ok", text: "Gmail connected. Scan to import receipts." },
-  failed: { tone: "error", text: "Gmail connection failed. The link may have expired — try connecting again." },
+  // Distinguished so each says something the user can act on. They were
+  // one message ("the link may have expired") that guessed at the cause,
+  // which is unhelpful when the real cause was a server-side token
+  // exchange failure the app had already discarded.
+  expired: { tone: "error", text: "That connection link had already been used or expired. Click Connect Gmail to start again." },
+  denied: { tone: "error", text: "Google did not grant access. If you declined, try again and approve the read-only permission." },
+  failed: { tone: "error", text: "Gmail connection failed on our side. The error has been reported — check Sentry for the cause." },
   unconfigured: { tone: "error", text: "Gmail scanning is not configured on this deployment." },
 };
 

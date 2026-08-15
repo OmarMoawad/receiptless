@@ -51,7 +51,7 @@ describe("connected-account features are reachable by a human", () => {
     // unconfigured, and nothing read it — so the outcome of consent was
     // invisible either way.
     const component = read("src/components/GmailConnections.tsx");
-    for (const outcome of ["connected", "failed", "unconfigured"]) {
+    for (const outcome of ["connected", "failed", "unconfigured", "expired", "denied"]) {
       expect(component).toContain(outcome);
     }
   });
