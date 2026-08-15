@@ -1634,18 +1634,62 @@ about proving the *path*.
 
 ### Still open
 
-- **Log drain** — Sentry's Vercel integration was installed 2026-08-15.
-  **Delivery is unverified**, and I cannot verify it from outside: it
-  needs the Vercel and Sentry dashboards. Installing an integration is not
-  the same as logs arriving, and this file should not record the second
-  when only the first was observed. Confirm at Vercel → Settings → Log
-  Drains, and by checking a recent deploy appears under Sentry → Releases.
+- **Log drain — NOT MET, blocked on Vercel plan tier.** Checked directly
+  in the dashboard, 2026-08-15. The Sentry integration *is* installed on
+  the team, but `receiptless` → Settings → Drains reports **"No drains are
+  associated with this project"**, and **Add Drain** is disabled with
+  "Upgrade your plan to enable Drains" — log drains are a **Pro** feature
+  and this account is on **Hobby**. Not resolvable by configuration; it
+  needs a paid plan, which is Omar's call and was not taken.
 - **Backups/PITR retention window** — still unconfirmed in the Neon
   dashboard. The hard gate below is therefore **not satisfied**, and 25
   real receipts now exist in that database. This is the most pressing
   remaining item.
 - **OCR** — no hosting story; photo OCR does not work in production, by
   decision.
+
+## Log drain — not met, and why that is the honest answer (2026-08-15)
+
+Session 10's observability criterion names two things: **error tracking**
+and **a log drain**. One is met and has proved itself; the other cannot be
+met on this account's plan.
+
+**Error tracking: met, and demonstrated.** Sentry is live in production,
+scrubbing receipt data before events leave the process. It earned the
+criterion the same day by identifying a bad Google client secret from a
+single captured event — `Google API request failed with status 401` on the
+Gmail callback — after two wrong guesses from outside.
+
+**Log drain: not met.** Verified in the Vercel dashboard rather than
+assumed:
+
+- Sentry's Vercel integration **is** installed on the team.
+- `receiptless` → Settings → Drains: **"No drains are associated with this
+  project."** Installing the integration created none.
+- **Add Drain** is disabled, tooltip *"Upgrade your plan to enable
+  Drains"*, panel reads *"Upgrade to Pro to create your first Drain."*
+
+So this is a **plan-tier limitation on Hobby**, not a misconfiguration.
+Upgrading is a purchase and Omar's decision; it was not made, so the
+criterion stands as unmet rather than being quietly redefined into
+something the account can satisfy.
+
+**What is lost by not having it:** Sentry sees anything that *throws*. A
+drain would cover what does not — a function that times out, a request
+that hangs, a deploy-time failure, or the platform logs around an incident.
+Today's `console.error` in the Gmail callback goes to Vercel's built-in
+runtime logs, which are short-retention and have no alerting. That is a
+real gap and not a substitute.
+
+**When to revisit:** before real users depend on this, or the first time
+an incident is not explicable from Sentry alone. Not urgent for a solo
+project with 25 test receipts and a 6-hour backup window.
+
+**Process note.** This item was recorded earlier today as "installed,
+delivery unverified" specifically because installing an integration is not
+the same as logs arriving. That caution was correct — the integration had
+in fact created nothing. Worth remembering the next time an install step
+looks like completion.
 
 ## Backup posture — confirmed, and thin (2026-08-15)
 
