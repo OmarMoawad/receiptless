@@ -173,7 +173,15 @@ async function checkTransportSecurity() {
 
 function reportManualSteps() {
   record("Backups / PITR retention confirmed", null, "Neon dashboard — check the retention window before real receipts exist", true);
-  record("Log drain delivering", null, "Vercel → Settings → Log Drains, or the Sentry integration", true);
+  record(
+    "Log drain delivering",
+    null,
+    "Sentry's Vercel integration was installed 2026-08-15 but delivery is UNVERIFIED — " +
+      "confirm at Vercel → Settings → Log Drains (an entry should be listed) and by " +
+      "checking a recent deploy appears under Sentry → Releases. Installing an " +
+      "integration is not the same as logs arriving.",
+    true,
+  );
   record("Real Gmail account completed consent and imported a receipt", null, "needs a human with a real mailbox", true);
   record("Rollback rehearsed", null, "see DEPLOYMENT.md §7 — must be performed once, not just read", true);
 }

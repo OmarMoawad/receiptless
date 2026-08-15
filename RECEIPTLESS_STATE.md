@@ -1634,14 +1634,44 @@ about proving the *path*.
 
 ### Still open
 
-- **Log drain** — not configured. Error tracking is live and proven; the
-  drain half of the criterion is not met.
+- **Log drain** — Sentry's Vercel integration was installed 2026-08-15.
+  **Delivery is unverified**, and I cannot verify it from outside: it
+  needs the Vercel and Sentry dashboards. Installing an integration is not
+  the same as logs arriving, and this file should not record the second
+  when only the first was observed. Confirm at Vercel → Settings → Log
+  Drains, and by checking a recent deploy appears under Sentry → Releases.
 - **Backups/PITR retention window** — still unconfirmed in the Neon
   dashboard. The hard gate below is therefore **not satisfied**, and 25
   real receipts now exist in that database. This is the most pressing
   remaining item.
 - **OCR** — no hosting story; photo OCR does not work in production, by
   decision.
+
+## Backup posture — confirmed, and thin (2026-08-15)
+
+**Neon history retention on this project is 6 hours.** Checked in the Neon
+console, 2026-08-15. The hard gate below required this be *confirmed*
+before real data, not that it be long — so the gate is now satisfied. What
+it buys is worth stating plainly rather than filing as "backups: yes".
+
+**What 6 hours covers:** a bad migration or an accidental delete you
+notice and act on the same working session. Point-in-time restore to any
+moment inside that window.
+
+**What it does not cover:** anything noticed the next morning. A delete at
+23:00 is unrecoverable by 06:00. There is no daily snapshot behind it on
+this tier — 6 hours is the whole safety net.
+
+**Not tested.** A restore has never been performed. The retention *window*
+is confirmed; the ability to actually restore from it is not, which is the
+same distinction this repo keeps having to make between a documented
+procedure and a rehearsed one. Rolling back a deployment was rehearsed
+(42 s, see above); restoring the database has not been.
+
+**Standing decision:** acceptable while the database holds 25 test
+receipts imported from one mailbox. **Revisit before this holds data whose
+loss would matter** — either extend retention on a paid tier, or add an
+independent periodic dump, and rehearse a restore once either exists.
 
 ## Session cadence for Phase 2 — re-baselined 2026-08-13
 
