@@ -295,8 +295,9 @@ to Phases 3+ (see "What's genuinely hard here" below).
 - Optional bank/card statement reconciliation to catch receipts the user
   never captured
 - **Spending guardrails** — the module that acts on all of the above
-  instead of just charting it, written up in its own section below because
-  it carries product and ethical constraints the rest of Phase 6 does not
+  instead of just charting it, including a 1–10 need score per purchase,
+  written up in its own section below because it carries product and
+  ethical constraints the rest of Phase 6 does not
 
 ## Spending guardrails — AI that argues for *not* buying (documented intent, not built)
 
@@ -497,6 +498,131 @@ requirement, not a caveat:
   benchmark recomputed without them. Using the benchmarks and contributing
   to them are separate consents.
 
+### Need scoring — rating a purchase 1–10, and the formula behind it
+
+Every scored purchase gets a **need score from 1 to 10**: 10 is something
+the household cannot go without, 1 is something bought purely because it
+was in front of the user. The score is what makes every other part of this
+module concrete — a duplicate-purchase warning, a cohort band, or a
+pre-purchase check all become "you're about to spend a third of this
+month's discretionary budget on a 3."
+
+**There is no single accepted formula for this, and any source claiming one
+should be distrusted.** What does exist is three well-established pieces
+that compose into one, and using them is what keeps this from being a
+number invented to look rigorous:
+
+**1. The economic anchor — income elasticity of demand (YED).** Economics
+already has an empirical, non-opinion definition of "necessity," and it is
+not a survey of what feels essential: a good's income elasticity is the
+percent change in quantity demanded over the percent change in income, and
+**the threshold sits at exactly 1**. Between 0 and 1 the good is a
+necessity (as income rises, spending on it rises more slowly — the Engel
+curve is flatter than a ray through the origin); above 1 it is a luxury;
+below 0 it is an inferior good. This is the single strongest component
+available, and unusually, **receiptless can actually estimate it** — the
+cohort structure above supplies exactly the income bands and item-level
+quantities an Engel curve needs, which almost no consumer app is in a
+position to compute. Mapped to a utility in `[0,1]`, monotone decreasing
+and neatly centred on the literature's own threshold:
+
+```
+u_elasticity = 1 / (1 + YED)        # YED=0 → 1.0, YED=1 → 0.5, YED=2 → 0.33
+```
+
+**2. The social anchor — the consensual/deprivation method.** Elasticity
+describes a good's behaviour across a population; it says nothing about
+whether people consider it a necessity of life. Poverty research has
+measured that directly since the 1980s by asking large samples which items
+are necessities, and the **proportional deprivation index** refinement
+exists precisely because different population groups answer differently —
+which is the right structure here, since the cohort is already defined.
+So `u_consensus = p`, the share of the *user's own cohort* rating that
+category a necessity, rather than a national average that flattens them.
+
+**3. The aggregation — multi-attribute utility theory (MAUT).** The
+standard way to combine incompatible criteria (currency, months, counts)
+into one score: normalize each to `[0,1]`, weight them so the weights sum
+to 1, and take the weighted sum. The 1–10 presentation is then just
+`N = 1 + 9·U`.
+
+Composed, with the population terms above joined by the terms only the
+vault can supply:
+
+```
+U = w₁·u_elasticity      # necessity as economics defines it (YED)
+  + w₂·u_consensus       # necessity as the user's cohort defines it
+  + w₃·u_unowned         # 0 if a working one is already owned, →1 if none
+  + w₄·u_urgency         # elapsed ÷ expected lifetime of the one owned
+  + w₅·u_cost_per_use    # expected uses ÷ price, from actual item history
+  + w₆·u_irreplaceable   # no adequate substitute already in the vault
+
+N = round(1 + 9·U)        Σwᵢ = 1
+```
+
+#### The design decisions inside that formula, which matter more than the algebra
+
+- **A gate runs before the model, and outranks it.** Anything in the
+  adequacy basket — medicine, food staples, utilities, childcare,
+  transport to work, medical devices, anything the user marks essential —
+  is **pinned at 10 without being scored at all**. It is not given a high
+  weight; it never enters the formula. A model that can output a 6 for
+  insulin is a model that will eventually output a 6 for insulin.
+- **Need and affordability are two axes, never multiplied into one.**
+  The obvious move is a `w₇·budget_strain` term that pulls the score down
+  when something is expensive. It is wrong, and MAUT itself says why: the
+  additive form is only valid when criteria are utility-independent, and
+  need and affordability are anything but. Merging them lets "I really
+  need this" cancel out "this breaks my month," which is the exact
+  reasoning this module exists to interrupt. So a purchase is reported as
+  **need 9 / strain high** — two numbers, both visible, no single blended
+  verdict hiding the tension between them.
+- **The scale is ordinal, not cardinal.** A 7 is not 1.4× as needed as a
+  5. Displayed as bands with the score, never used in arithmetic
+  downstream (no "average need score," no month-over-month need index),
+  because averaging an ordinal scale manufactures precision that isn't
+  there.
+- **Weights belong to the user, with published defaults.** The constraint
+  above — that "unnecessary" is the user's judgement and never the
+  model's — is enforceable here in a way it isn't in prose: `wᵢ` is
+  literally an editable vector. The defaults ship visible and documented,
+  not tuned silently.
+- **Thin data produces a range, not a number.** With no cohort elasticity
+  estimate and no purchase history for a category, the honest output is
+  "4–7, low confidence," or no score at all. A confident-looking integer
+  derived from two receipts is the same class of error as this document's
+  deleted "90%+ capture" claim.
+- **Calibration is a shipping requirement.** Sanity-check monotonicity
+  (more owned ⇒ never a higher score; longer remaining life ⇒ never
+  higher), and check that users agree with the extremes — the 1s and the
+  10s — since those are what the module actually acts on.
+
+#### Where this must never be used
+
+- **It is not a purchase permission, and nothing is ever blocked.** The
+  score is shown; the user buys what they want. A guardrail that becomes a
+  gate gets circumvented and deserves to be.
+- **It never leaves the vault.** A per-user "need score" history is an
+  almost perfect creditworthiness and vulnerability proxy — exactly what a
+  lender, insurer, or employer would pay for, and exactly the
+  discrimination input the cohort-data prohibition above already forbids.
+  The same prohibition covers this, explicitly, including any aggregate
+  or derived form of it.
+- **It is not applied to other people's purchases.** No shared-household
+  scoring of a partner's or a child's spending, no exportable report that
+  turns this into an instrument of control over someone with less power in
+  the household. Single-user, self-directed, or it isn't built.
+
+Sources for the three anchors, so the formula can be checked rather than
+taken on faith: income elasticity thresholds and Engel-curve shape —
+[Oxford Reference](https://www.oxfordreference.com/display/10.1093/oi/authority.20110803095751949)
+and [ScienceDirect's overview](https://www.sciencedirect.com/topics/economics-econometrics-and-finance/income-elasticity-of-demand);
+the consensual/deprivation method and its proportional index —
+[Poverty and Social Exclusion](https://www.poverty.ac.uk/definitions-poverty/consensual-method)
+and [Minimum Income Standards and Reference Budgets](https://www.cambridge.org/core/books/minimum-income-standards-and-reference-budgets/B10B0B41342C1A49BC58B3DF8CF34F41);
+MAUT's weighted-additive model and its utility-independence condition —
+[ML Wiki](http://mlwiki.org/index.php/Multi-Attribute_Utility_Theory).
+
 ### The constraints, which are the hard part
 
 These are not caveats to be trimmed later. A module that argues against
@@ -585,6 +711,11 @@ line-item history per user to say anything true — which means real
 ingestion at real volume (Phases 1–2), not a demo vault. Two things do
 follow from that:
 
+- The **need score is the first thing to build and the cheapest to test**:
+  its ownership, urgency and cost-per-use terms run off the vault alone,
+  and the elasticity and consensus terms can start from published data
+  before any cohort exists. A version with `w₁ = w₂ = 0` is a working
+  score on day one.
 - A **deterministic v0 with no AI in it at all** — duplicate detection,
   recurring-charge detection, repurchase intervals, price-change alerts —
   is buildable as soon as the vault has real data, and is where most of the
