@@ -111,7 +111,10 @@ describe("conservative defaults", () => {
   it("uses safe placeholders when nothing can be established", () => {
     const parsed = resolveEmailReceipt(fixtureEmail({ text: "", from: "someone@localhost" }), NOW);
     expect(parsed.merchant).toBe(UNKNOWN_MERCHANT);
-    expect(parsed.totalMinor).toBe(0);
+    // null, not 0. A total that could not be read is not a total of zero,
+    // and defaulting it to zero is what let 25 unreadable emails import as
+    // $0.00 receipts on the first real Gmail scan.
+    expect(parsed.totalMinor).toBeNull();
     expect(parsed.currency).toBe("USD");
     expect(parsed.items).toEqual([]);
   });
@@ -158,5 +161,31 @@ describe("the email Date header is untrusted input, not the clock", () => {
       NOW,
     );
     expect(parsed.purchasedAt).toEqual(NOW);
+  });
+});
+
+describe("rejecting parse artefacts", () => {
+  // The first real Gmail scan reported "25 messages, 25 receipts imported,
+  // 0 failed" — a perfect record that was really an inability to fail.
+  // pos-slip's detect() always matches, so every message got an adapter,
+  // and a missing total defaulted to zero, so every message got a receipt.
+  it("reports a missing total as null rather than a zero-value receipt", () => {
+    const parsed = resolveEmailReceipt(fixtureEmail({ text: "Thanks for your order!", from: "no-reply@shop.example" }), NOW);
+    expect(parsed.totalMinor).toBeNull();
+  });
+
+  it("refuses a date as a merchant name", () => {
+    // pos-slip takes the slip's top line as the store name. On real Gmail
+    // receipts that line is often the date, which filled the vault with
+    // entries titled "Aug 15, 2026".
+    for (const line of ["Aug 15, 2026", "15/08/2026", "2026-08-15"]) {
+      const parsed = resolveEmailReceipt(fixtureEmail({ text: `${line}\nTOTAL $12.00`, from: "x@localhost" }), NOW);
+      expect(parsed.merchant, `"${line}" should not be treated as a merchant`).not.toBe(line);
+    }
+  });
+
+  it("refuses a merchant name with no letters in it", () => {
+    const parsed = resolveEmailReceipt(fixtureEmail({ text: "$$$ 12.00\nTOTAL $12.00", from: "x@localhost" }), NOW);
+    expect(parsed.merchant).toBe(UNKNOWN_MERCHANT);
   });
 });

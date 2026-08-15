@@ -35,6 +35,7 @@ type ScanResult = {
   messagesSeen?: number;
   receiptsCreated?: number;
   duplicates?: number;
+  unparseable?: number;
   failures?: number;
 };
 
@@ -150,6 +151,15 @@ export function GmailConnections() {
           <p className="text-sm text-neutral-500">
             Read-only access, used to find receipts. receiptless never sends mail.
           </p>
+          {/*
+            Google expires refresh tokens after 7 days while an app's
+            consent screen is in "Testing". Stated here because the failure
+            is otherwise silent and a week later — the connection simply
+            stops working with no user-visible cause.
+          */}
+          <p className="text-xs text-neutral-500">
+            This app is unverified with Google, so connections expire after 7 days and need reconnecting.
+          </p>
         </div>
         <button
           onClick={connect}
@@ -218,7 +228,8 @@ export function GmailConnections() {
         // silently skipped half a mailbox should not read as a clean run.
         <p role="status" className="text-sm text-neutral-700 bg-neutral-50 border border-neutral-200 rounded px-3 py-2">
           Scanned {scan.messagesSeen ?? 0} message(s): {scan.receiptsCreated ?? 0} receipt(s) imported,{" "}
-          {scan.duplicates ?? 0} already known, {scan.failures ?? 0} failed.
+          {scan.duplicates ?? 0} already known, {scan.unparseable ?? 0} not recognised as receipts,{" "}
+          {scan.failures ?? 0} failed.
         </p>
       )}
     </section>

@@ -12,7 +12,8 @@ export type ParsedEmailReceipt = {
   /** Which format adapter produced this — recorded on the receipt for debugging. */
   adapterId: string;
   merchant: string;
-  totalMinor: number;
+  /** null when no total was found — see registry.ts. Callers must handle it. */
+  totalMinor: number | null;
   currency: string;
   purchasedAt: Date;
   items: Array<{ name: string; quantity: number; unitPriceMinor: number; totalPriceMinor: number }>;

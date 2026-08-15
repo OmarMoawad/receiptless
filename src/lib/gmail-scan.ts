@@ -20,6 +20,13 @@ export type GmailScanResult = {
   messagesSeen: number;
   receiptsCreated: number;
   duplicates: number;
+  /**
+   * Messages the parser could not read a total from. Counted separately
+   * from `failures` (which are thrown errors) because they are not faults
+   * — they are the honest measure of how much of a real inbox this
+   * actually understands.
+   */
+  unparseable: number;
   /** Messages that threw during parse/ingest. See the isolation note below. */
   failures: number;
 };
@@ -56,7 +63,7 @@ export async function scanGmailConnection(
   userId: string,
   apiClient: GmailApiClient,
 ): Promise<GmailScanResult> {
-  const empty = { messagesSeen: 0, receiptsCreated: 0, duplicates: 0, failures: 0 };
+  const empty = { messagesSeen: 0, receiptsCreated: 0, duplicates: 0, unparseable: 0, failures: 0 };
 
   const connection = await prisma.emailConnection.findFirst({ where: { id: connectionId, userId } });
   if (!connection) return { status: "not-connected", ...empty };
@@ -73,6 +80,7 @@ export async function scanGmailConnection(
 
   let receiptsCreated = 0;
   let duplicates = 0;
+  let unparseable = 0;
   let failures = 0;
   let newestSeen = connection.lastScannedAt ?? null;
   // The timestamp of the *oldest* message that failed this scan. The
@@ -99,6 +107,7 @@ export async function scanGmailConnection(
       const result = await ingestEmailForUser(userId, email);
       if (result.status === "created") receiptsCreated += 1;
       if (result.status === "duplicate") duplicates += 1;
+      if (result.status === "unparseable") unparseable += 1;
       if (email.receivedAt && (!newestSeen || email.receivedAt > newestSeen)) newestSeen = email.receivedAt;
     } catch {
       failures += 1;
@@ -141,5 +150,5 @@ export async function scanGmailConnection(
     await prisma.emailConnection.update({ where: { id: connectionId }, data: { lastScannedAt: nextCursor } });
   }
 
-  return { status: "scanned", messagesSeen: ids.length, receiptsCreated, duplicates, failures };
+  return { status: "scanned", messagesSeen: ids.length, receiptsCreated, duplicates, unparseable, failures };
 }

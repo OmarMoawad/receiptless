@@ -12,6 +12,7 @@
  */
 import type { InboundEmail } from "../inbound-email";
 import { keyValueAdapter } from "./key-value";
+import { parseReceiptDate } from "./text";
 import { orderSummaryAdapter } from "./order-summary";
 import { posSlipAdapter } from "./pos-slip";
 import type { AdapterItem, ReceiptAdapter } from "./types";
@@ -21,7 +22,21 @@ export const adapters: ReceiptAdapter[] = [orderSummaryAdapter, keyValueAdapter,
 export type ResolvedEmailReceipt = {
   adapterId: string;
   merchant: string;
-  totalMinor: number;
+  /**
+   * **null when no total could be parsed** — deliberately distinct from a
+   * genuine zero.
+   *
+   * This used to default to `0`, which meant an email the parser could not
+   * read at all became a $0.00 receipt in the vault. The first real Gmail
+   * scan imported 25 of 25 messages with zero failures precisely because
+   * nothing could fail: pos-slip's detect() always matches, and a missing
+   * total silently became zero. A scan that cannot fail is not a scan that
+   * succeeded.
+   *
+   * Callers must decide what to do with null. `ingestEmailForUser` rejects
+   * it rather than storing a receipt with no amount.
+   */
+  totalMinor: number | null;
   currency: string;
   purchasedAt: Date;
   items: AdapterItem[];
@@ -79,18 +94,37 @@ function usableDate(candidate: Date | null, ingestedAt: Date): Date | null {
  *   2. the email's own Date header (untrusted, sender-set — validated)
  *   3. `ingestedAt` itself (trusted, always usable)
  */
+/**
+ * Rejects a "merchant" that is really a date.
+ *
+ * pos-slip takes the slip's top line as the store name. On real Gmail
+ * receipts that line is frequently the date, so the vault filled with
+ * entries titled `Aug 15, 2026`. A merchant name that parses as a date is
+ * a parse artefact, not a merchant.
+ */
+function usableMerchant(candidate: string | null | undefined): string | null {
+  const merchant = candidate?.trim();
+  if (!merchant || merchant.length === 0) return null;
+  // A bare date, with or without a weekday, in the common orderings.
+  if (parseReceiptDate(merchant)) return null;
+  if (/^\s*\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}\s*$/.test(merchant)) return null;
+  // A line that is only digits, currency and punctuation is an amount.
+  if (!/[\p{L}]/u.test(merchant)) return null;
+  return merchant.slice(0, 200);
+}
+
 export function resolveEmailReceipt(email: InboundEmail, ingestedAt: Date = new Date()): ResolvedEmailReceipt {
   const adapter = selectAdapter(email);
   const result = adapter.parse(email);
-  const merchant = result.merchant?.trim();
 
   const printedDate = usableDate(result.purchasedAt, ingestedAt);
   const headerDate = usableDate(email.receivedAt, ingestedAt);
 
   return {
     adapterId: adapter.id,
-    merchant: merchant && merchant.length > 0 ? merchant.slice(0, 200) : UNKNOWN_MERCHANT,
-    totalMinor: result.totalMinor ?? 0,
+    merchant: usableMerchant(result.merchant) ?? UNKNOWN_MERCHANT,
+    // Passed through as null rather than defaulted — see the type.
+    totalMinor: result.totalMinor ?? null,
     currency: result.currency ?? DEFAULT_CURRENCY,
     purchasedAt: printedDate ?? headerDate ?? ingestedAt,
     items: result.items,

@@ -287,6 +287,28 @@ Then force-push the branch. **Note:** GitHub sometimes does not update an
 open PR's head after a force-push. Pushing an ordinary commit afterwards
 makes it re-sync.
 
+## 9. Smoke-test the journey a human walks
+
+```bash
+npm run smoke -- https://<your-domain>
+```
+
+Registers a throwaway account, signs in, loads the vault, and confirms the
+connected-account UI is present. It exists because two features shipped to
+production this session that 219 passing tests could not see — there was
+no sign-in UI at all, and no Gmail UI at all. Both backends worked and
+were tested; neither was reachable.
+
+**Every test in this repo calls the API directly**, and a test that posts
+to `/api/auth/login` proves the endpoint works while saying nothing about
+whether a human can reach it. This is a floor, not a ceiling: it uses
+`fetch` rather than a browser, so it cannot catch a component that throws
+at render. A Playwright suite would be strictly better and is worth a
+Phase 2 session.
+
+It leaves a throwaway account behind — point it at a deployment where that
+is acceptable.
+
 ## Still open
 
 - Rate limiting on the auth endpoints. Vercel's platform rate limiting or
