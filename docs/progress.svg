@@ -29,12 +29,12 @@
   <text x="656" y="42" text-anchor="end" class="serif pct" font-size="26" font-weight="600">24%</text>
   <rect x="24.00" y="74" width="67.56" height="10" rx="3" class="seg-bg" /><rect x="24.00" y="74" width="67.56" height="10" rx="3" class="seg-done" />
     <rect x="94.56" y="74" width="67.56" height="10" rx="3" class="seg-bg" /><rect x="94.56" y="74" width="67.56" height="10" rx="3" class="seg-done" />
-    <rect x="165.11" y="74" width="67.56" height="10" rx="3" class="seg-bg" /><rect x="165.11" y="74" width="11.26" height="10" rx="3" class="seg-current" />
+    <rect x="165.11" y="74" width="67.56" height="10" rx="3" class="seg-bg" /><rect x="165.11" y="74" width="9.65" height="10" rx="3" class="seg-current" />
     <rect x="235.67" y="74" width="67.56" height="10" rx="3" class="seg-bg" />
     <rect x="306.22" y="74" width="67.56" height="10" rx="3" class="seg-bg" />
     <rect x="376.78" y="74" width="67.56" height="10" rx="3" class="seg-bg" />
     <rect x="447.33" y="74" width="67.56" height="10" rx="3" class="seg-bg" />
     <rect x="517.89" y="74" width="67.56" height="10" rx="3" class="seg-bg" />
     <rect x="588.44" y="74" width="67.56" height="10" rx="3" class="seg-bg" />
-  <text x="24" y="94" class="ink-soft" font-size="11">Phase 2 of 8 · "Vault maturity" · 1/6 sessions</text>
+  <text x="24" y="94" class="ink-soft" font-size="11">Phase 2 of 8 · "Vault maturity" · 1/7 sessions</text>
 </svg>

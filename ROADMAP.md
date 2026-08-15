@@ -141,6 +141,11 @@ choices) vs. what's solo-buildable right now. This bullet list is the
 
 ## Phase 2 — Vault maturity (Months 2–3)
 
+- **First: upgrade Vercel to Pro and finish the observability criterion.**
+  Session 10 required error tracking *and* a log drain; the drain is
+  Pro-only and this account is on Hobby, so it is the one exit criterion
+  that went unmet. It needs a purchase, not engineering time, which is why
+  it leads the milestone rather than trailing it.
 - Real search (full-text, eventually semantic) across merchants, items, notes
 - Warranty/return views surfaced in the UI, not just stored in the schema
 - CSV/PDF export, tax-category tagging, multi-currency with historical FX
