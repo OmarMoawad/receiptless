@@ -27,6 +27,36 @@ import { describe, expect, it } from "vitest";
 const root = resolve(import.meta.dirname, "../../..");
 const read = (relative: string) => readFileSync(resolve(root, relative), "utf8");
 
+describe("connected-account features are reachable by a human", () => {
+  // The same bug as sign-in, in the same repo, found the same way: Session
+  // 9 shipped the whole Gmail OAuth backend — PKCE, encrypted tokens,
+  // refresh, disconnect, scanning — with tests, and no UI whatsoever. Not
+  // one occurrence of "gmail" existed in any component.
+  it("renders a Gmail connection UI that reaches the OAuth endpoints", () => {
+    const component = read("src/components/GmailConnections.tsx");
+    expect(component).toContain("/api/email/connections/gmail/start");
+    expect(component).toContain("/api/email/connections");
+    // Scan and disconnect are useless if unreachable too.
+    expect(component).toContain("/scan");
+    expect(component).toContain("/disconnect");
+  });
+
+  it("is actually mounted on a page, not merely defined", () => {
+    // A component nobody renders is the same defect as no component.
+    expect(read("src/app/receipts/page.tsx")).toContain("GmailConnections");
+  });
+
+  it("surfaces the callback's own result parameter", () => {
+    // gmail/callback redirects to /receipts?gmail=connected|failed|
+    // unconfigured, and nothing read it — so the outcome of consent was
+    // invisible either way.
+    const component = read("src/components/GmailConnections.tsx");
+    for (const outcome of ["connected", "failed", "unconfigured"]) {
+      expect(component).toContain(outcome);
+    }
+  });
+});
+
 describe("sign-in is reachable by a human", () => {
   it("has a sign-in page", () => {
     expect(existsSync(resolve(root, "src/app/signin/page.tsx"))).toBe(true);

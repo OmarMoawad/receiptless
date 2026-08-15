@@ -1,5 +1,7 @@
 import { cookies } from "next/headers";
+import { Suspense } from "react";
 import Link from "next/link";
+import { GmailConnections } from "@/components/GmailConnections";
 import { getCurrentUserFromCookies } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { formatMinorUnits } from "@/lib/money";
@@ -68,6 +70,20 @@ export default async function ReceiptsPage({
           + Add receipt
         </Link>
       </div>
+
+      {/*
+        Session 10 slice: this is where Gmail connection lives. Session 9
+        built the entire OAuth backend and shipped no interface for it —
+        there was no way to connect an account, scan, or disconnect, and
+        the callback's own ?gmail= result was never displayed.
+
+        Suspense because GmailConnections reads searchParams via
+        useSearchParams, which Next.js requires be suspended in a server
+        component tree.
+      */}
+      <Suspense fallback={null}>
+        <GmailConnections />
+      </Suspense>
 
       <form className="flex gap-2">
         <input
