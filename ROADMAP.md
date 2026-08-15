@@ -554,11 +554,54 @@ U = w₁·u_elasticity      # necessity as economics defines it (YED)
   + w₂·u_consensus       # necessity as the user's cohort defines it
   + w₃·u_unowned         # 0 if a working one is already owned, →1 if none
   + w₄·u_urgency         # elapsed ÷ expected lifetime of the one owned
-  + w₅·u_cost_per_use    # expected uses ÷ price, from actual item history
+  + w₅·u_cost_per_use    # expected uses ÷ price — hardest to source, see below
   + w₆·u_irreplaceable   # no adequate substitute already in the vault
 
 N = round(1 + 9·U)        Σwᵢ = 1
 ```
+
+#### What each term actually requires, and whether receiptless will have it
+
+The formula above is easy to write and much harder to source. Before any
+of it is built, this is the honest inventory — deliberately written as
+inputs rather than as functional forms, because for several terms the
+undefined symbol *is* the hard part, and giving it an equation would hide
+that rather than solve it.
+
+| Term | Needs | Have it? |
+|---|---|---|
+| `u_elasticity` | Cohort income bands × item quantities over time | **Not yet** — gated on the same k = 50 cohorts as the benchmark above. Published elasticity estimates bootstrap it in the meantime |
+| `u_consensus` | Which categories the user's cohort calls necessities | **No** — needs a survey we would have to run ourselves; published deprivation-survey data bootstraps it |
+| `u_unowned` | Prior purchases of the same product, matched across merchants | **Partly** — the receipts exist; matching them doesn't. GTIN/SKU works where present, fuzzy item-name normalization where it isn't, and that normalization is the unsolved part |
+| `u_urgency` | Expected lifetime per product category | **No** — derivable from observed repurchase intervals at scale, but see the caveat below |
+| `u_cost_per_use` | Expected number of uses | **Structurally absent — see below** |
+| `u_irreplaceable` | A substitutability graph over product categories | **No** — a product taxonomy project in its own right, not a term to be estimated |
+
+Two of those need saying plainly rather than leaving in a table cell:
+
+- **`u_cost_per_use` may not be buildable at all, and was overstated when
+  first written here.** A receipt vault observes *purchases*, never *uses*.
+  It can see that running shoes were rebought after fourteen months; it
+  cannot see whether anyone ran in them. The only routes to expected uses
+  are asking the user directly — friction at exactly the wrong moment — or
+  inferring it from repurchase, which is not the same quantity. Treat this
+  term as unproven and be willing to drop it.
+- **`u_urgency`'s repurchase-interval proxy measures replacement
+  *behaviour*, not product *lifetime*.** People replace working phones and
+  keep broken toasters. Fitted naively, this term would score the churn
+  the module exists to discourage as urgency, which is the failure
+  inverted — it needs a signal that the previous item actually stopped
+  working, which receipts alone don't carry either.
+
+**A term whose data never materializes gets removed and its weight
+redistributed — never estimated by a model to fill the gap.** That is
+precisely the "the AI does not invent numbers" constraint below, applied
+where it is most tempting to break: a missing input inside an otherwise
+working formula is the easiest place in this entire module to quietly
+substitute a plausible guess. Four of the six terms are gated on scale or
+on data that does not exist today, so the first version that ships is a
+two-term score — and it should say so on its face rather than presenting
+six terms' worth of confidence.
 
 #### The design decisions inside that formula, which matter more than the algebra
 
