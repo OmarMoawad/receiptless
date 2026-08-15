@@ -10,7 +10,14 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-> **Next action: finish Session 10's slice — connect a real Gmail account.**
+> **Next action: confirm Neon's retention window, then Phase 2 session 1.**
+> **Session 10 is COMPLETE** — a real Gmail account connected to
+> production and 25 real receipts imported, 0 failed. Two carry-over
+> items: the log drain, and the Neon retention window, which now matters
+> more because real receipt data exists. Parse quality against real mail
+> is poor and deserves its own session — see "Session 10 — COMPLETE".
+>
+> Superseded: **finish Session 10's slice — connect a real Gmail account.**
 > receiptless is **deployed and verified**: https://receiptless-theta.vercel.app,
 > 12/12 automated checks, rollback rehearsed at 42 s recovery. What remains
 > is the log drain, the Neon retention window, and the one thing all of it
@@ -1548,6 +1555,93 @@ remains unexercised. That case is now *prevented* rather than rehearsed:
   is the scaffolding for that path, not the path.
 - **OCR** — the Surya service has no hosting story and is not part of this
   deployment. Photo OCR does not work in production, by decision.
+
+## Session 10 — COMPLETE. The slice works end to end (2026-08-15)
+
+**A real Gmail account connected to the production deployment and 25 real
+receipts landed in the vault.** That is the thing nine sessions of tested
+code were scaffolding for, and it is now done rather than described.
+
+```
+Gmail connected: okamel1000@aucegypt.edu
+Scanned 25 message(s): 25 receipt(s) imported, 0 already known, 0 failed
+```
+
+Receipts render in the vault and are searchable. Production:
+https://receiptless-theta.vercel.app — Vercel (fra1), Neon `eu-central-1`
+pooled, Cloudflare R2, Sentry. 12/12 automated checks.
+
+### What the slice cost, and what that says
+
+Getting one path working in production surfaced **seven** defects, none of
+which any test suite in this repo could have found, because all 219 tests
+called the API directly:
+
+1. **A destructive migration already in history** — `20260811201429_add_receipt_image_key`
+   drops a column and adds another in one migration, the exact pattern
+   DEPLOYMENT.md warns against. Now allowlisted with reasoning and blocked
+   in CI by `npm run check:migrations`.
+2. **`neonctl init` would have pointed the destructive test suite at
+   production.** It writes the production `DATABASE_URL` into `.env`, and
+   this suite deletes data. Guarded by `src/test/guard-local-database.ts`.
+3. **No sign-in UI existed at all.** Two pages said "Sign in" and nothing
+   rendered a form; there was not one password input in the codebase. The
+   application was unusable by any human.
+4. **No Gmail UI existed either.** Session 9 shipped the entire OAuth
+   backend — PKCE, encrypted tokens, refresh, disconnect, scanning — with
+   zero interface. Not one occurrence of "gmail" in any component.
+5. **No git commit identity was configured**, so every commit was authored
+   to a nonexistent address and Vercel refused PR previews. Masked for
+   nine sessions because merge commits are authored by GitHub.
+6. **The Gmail callback discarded its errors** in a bare `catch {}`. The
+   first live failure left no evidence anywhere.
+7. **Credentials were wrong twice** — client ID, then client secret — and
+   only the last one was diagnosable, because by then the callback
+   reported to Sentry.
+
+Findings 3 and 4 share one root cause worth stating plainly: **a suite
+that calls endpoints cannot tell you the endpoints are unreachable.**
+Session 9 reported itself complete with 188 passing tests while shipping
+something no user could reach. Twice.
+
+### Observability proved itself, and my earlier claim was too generous
+
+I recorded observability as "met" when Sentry existed. That was wrong in a
+way worth naming: Sentry existing is not the same as the paths most likely
+to fail reporting to it. The Gmail callback — the single most failure-prone
+path in the product — swallowed its errors entirely.
+
+Once wired, it paid for itself immediately. `Google API request failed with
+status 401` on `GET /api/email/connections/gmail/callback`, release
+`4c82a42f249e`, environment production — which identified a bad client
+secret in one line, after I had guessed wrong twice from outside.
+
+### Known gap: parse quality on real mail is poor
+
+Import succeeded mechanically — 25/25, no failures — but the *data* is
+weak, and this is the first look at real receipts rather than fixtures:
+
+- **Merchant names mostly missing.** Only "Talabat" resolved; the rest
+  display the date (`Aug 15, 2026`) where a merchant should be.
+- **At least one zero total** — Talabat imported at `$0.00`.
+- **Everything categorised `OTHER`.**
+
+The adapters were built and tested against hand-written synthetic
+fixtures, which is exactly the limitation flagged in the evidence ledger.
+Real Egyptian receipt mail — Talabat and similar — does not match them.
+Worth a Phase 2 session of its own; not a blocker for the slice, which was
+about proving the *path*.
+
+### Still open
+
+- **Log drain** — not configured. Error tracking is live and proven; the
+  drain half of the criterion is not met.
+- **Backups/PITR retention window** — still unconfirmed in the Neon
+  dashboard. The hard gate below is therefore **not satisfied**, and 25
+  real receipts now exist in that database. This is the most pressing
+  remaining item.
+- **OCR** — no hosting story; photo OCR does not work in production, by
+  decision.
 
 ## Session cadence for Phase 2 — re-baselined 2026-08-13
 
