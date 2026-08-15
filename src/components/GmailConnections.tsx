@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 /**
  * Session 10 slice — the Gmail connection UI.
@@ -52,10 +52,16 @@ const CALLBACK_MESSAGES: Record<string, { tone: "ok" | "error"; text: string }> 
   unconfigured: { tone: "error", text: "Gmail scanning is not configured on this deployment." },
 };
 
-export function GmailConnections() {
+export function GmailConnections({ initialConnections }: { initialConnections: Connection[] }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [connections, setConnections] = useState<Connection[] | null>(null);
+  // Seeded from the server component rather than fetched on mount. The
+  // mount effect this replaces called setState from inside an effect body,
+  // which React flags (react-hooks/set-state-in-effect) as a cascading
+  // render — and which shipped because CI did not run lint. The page is a
+  // server component with database access already, so there was never a
+  // reason to round-trip for this.
+  const [connections, setConnections] = useState<Connection[]>(initialConnections);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scan, setScan] = useState<ScanResult | null>(null);
@@ -74,10 +80,6 @@ export function GmailConnections() {
       // below report their own errors when they fail.
     }
   }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   async function connect() {
     setBusy("connect");
@@ -141,7 +143,7 @@ export function GmailConnections() {
     }
   }
 
-  const gmail = connections?.filter((connection) => connection.provider === "gmail") ?? [];
+  const gmail = connections.filter((connection) => connection.provider === "gmail");
 
   return (
     <section className="rounded border border-neutral-200 p-4 flex flex-col gap-3">

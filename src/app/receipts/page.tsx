@@ -41,6 +41,30 @@ export default async function ReceiptsPage({
   // receipts with no ownerId filter at all, bypassing Session 3's
   // tenant-isolation work entirely since it never goes through
   // /api/receipts. Fixed the same way every API route already is.
+  // Fetched here rather than from the client on mount: this component
+  // already has database access, and the mount effect it replaces set
+  // state from inside an effect body, which React flags as a cascading
+  // render. Selected field by field — encryptedTokenData must never reach
+  // the browser, and an explicit select means a sensitive column added
+  // later cannot start leaking silently.
+  const emailConnections = await prisma.emailConnection.findMany({
+    where: { userId: user.userId },
+    select: {
+      id: true,
+      provider: true,
+      status: true,
+      providerAccountEmail: true,
+      lastScannedAt: true,
+      createdAt: true,
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  const connections = emailConnections.map((connection) => ({
+    ...connection,
+    lastScannedAt: connection.lastScannedAt?.toISOString() ?? null,
+    createdAt: connection.createdAt.toISOString(),
+  }));
+
   const receipts = await prisma.receipt.findMany({
     where: {
       ownerId: user.userId,
@@ -82,7 +106,7 @@ export default async function ReceiptsPage({
         component tree.
       */}
       <Suspense fallback={null}>
-        <GmailConnections />
+        <GmailConnections initialConnections={connections} />
       </Suspense>
 
       <form className="flex gap-2">

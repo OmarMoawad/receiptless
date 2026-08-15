@@ -52,6 +52,14 @@ jobs:
 
       - run: npm run test
 
+      # Lint gates CI as of 2026-08-15. It did not before, which is how a
+      # react-hooks/set-state-in-effect error reached production in
+      # GmailConnections.tsx. `npm run lint` was also reporting 729 errors
+      # from the generated Prisma client and agent worktrees, so the signal
+      # was useless and ignoring it was rational — both are now excluded in
+      # eslint.config.mjs, and the remaining output is small enough to gate on.
+      - run: npm run lint
+
       # Must run before typecheck: Next.js generates its own ambient types
       # (.next/types — e.g. layout.tsx's LayoutProps) as a side effect of
       # building, and nothing commits those either. `next build` runs its

@@ -1481,8 +1481,11 @@ incident.
    *rehearsed at least once*, so it is **not met** until the state file
    records two SHAs and an elapsed recovery time. Do it while the database
    is still empty and a mistake costs nothing.
-4. **Backups/PITR unconfirmed** — check Neon's retention window before
-   real receipts exist, per the hard gate below.
+4. ~~**Backups/PITR unconfirmed**~~ — **resolved 2026-08-15**: confirmed
+   at **6 hours**, with the standing decision recorded in "Backup posture
+   — confirmed, and thin". The entries above are kept as the record of
+   what was true at the time; read the Backup posture section for current
+   state.
 5. **The real slice is unproven**: no Google account has completed
    consent, and no real receipt has landed in the vault from a real
    mailbox.
@@ -1554,9 +1557,13 @@ remains unexercised. That case is now *prevented* rather than rehearsed:
 - **Log drain** — not configured. Session 10 names error tracking *and* a
   log drain; only the first exists. Error tracking is live
   (`errorTrackingEnabled: true`).
+  **→ Superseded 2026-08-15**: established as *unmet and unmeetable on
+  this plan* — Vercel Drains are Pro-only. See "Log drain — not met".
 - **Backups/PITR retention window** — not yet confirmed in the Neon
   dashboard, so the hard gate below is **not** satisfied and no real
   receipt data should be treated as durable until it is.
+  **→ Superseded 2026-08-15**: confirmed at **6 hours**. See "Backup
+  posture — confirmed, and thin".
 - **The slice itself** — no real Gmail account has completed consent, and
   no real receipt has been imported from a real mailbox. Everything above
   is the scaffolding for that path, not the path.
@@ -1777,22 +1784,93 @@ because it closes the only Session 10 exit criterion that went unmet.
    protection for preview deployments — the latter matters once previews
    hold anything real.
 
-2. **Real search.** Postgres full-text over merchant, item names, and
+2. **Act on the external review (2026-08-15).** **Decided by Omar as the
+   item immediately after the Pro upgrade.**
+
+   An external review of `main` at `5d31d658` (CI passing, dependency
+   audit clean) raised 14 findings. Its verdict: *"reasonable as a
+   controlled beta using test/noncritical data"*, with a named list of
+   blockers before wider or commercial release. That framing is accepted —
+   the point of this session is to work the list, not to argue with it.
+
+   **Already fixed before this session, in response to the review** — its
+   findings #2 and #11, both introduced by the same day's work:
+
+   - The `RECEIPTLESS_STATE.md` contradiction (retention "unconfirmed" in
+     a Still-open list, confirmed further down). The historical entries
+     are kept and marked superseded rather than rewritten.
+   - `react-hooks/set-state-in-effect` in `GmailConnections.tsx`, fixed by
+     seeding connections from the server component instead of a mount
+     effect — **and CI now runs lint**, which it never did. `npm run lint`
+     had been reporting 729 errors from the generated Prisma client and
+     agent worktrees, so ignoring it was rational; both are now excluded
+     and the remaining output is small enough to gate on.
+
+   **This session's work, in the review's own priority order:**
+
+   1. **Backup and restore protection** (#1). Six-hour PITR with no
+      independent daily backup and no tested restore is too thin for data
+      anyone would miss. Extend retention or add periodic independent
+      dumps; **perform and document a real restore**; define acceptable
+      RPO and RTO explicitly rather than inheriting whatever the tier
+      gives.
+   2. **Authentication throttling and CSRF** (#4, #5). No rate limiting on
+      login or registration — password guessing and argon2 resource
+      exhaustion are both open. Apply a consistent trusted-origin or
+      CSRF-token policy across login, registration, OAuth mutations,
+      logout, receipt creation and upload, scan, and disconnect.
+   3. **Existing-data repair, and retryable parsing** (#6, #7, #8). The
+      parser no longer imports totals it could not read, but the `$0.00`
+      and date-as-merchant rows from the first scan **are still in
+      production**, and unparseable messages are marked seen with the
+      Gmail cursor advanced — so a better parser will never revisit them
+      (`inbound-email-ingestion.ts`). Needs a retryable/review state,
+      controlled reprocessing, and real anonymised fixtures with
+      confidence scoring and plausibility checks.
+   4. **Production observability** (#3) — closed by session 1 above if the
+      Pro upgrade happens; otherwise still open.
+   5. **OCR hosting and licensing** (#9, #10). Either deploy and monitor
+      the Surya service or **label it unavailable in production**, and
+      resolve that its model weights are non-commercial — replace them,
+      license them, or exclude the feature from commercial use. This is a
+      licensing question, not an engineering one, and it does not improve
+      by being deferred.
+   6. **Browser-level end-to-end test** (#12). `npm run smoke` uses
+      `fetch`, so it cannot see hydration failures, client exceptions,
+      broken controls, or navigation problems — a limitation stated when
+      it was written. Add a minimal Playwright journey.
+   7. **OAuth publication** (#13). Seven-day expiry is fine for a
+      controlled beta and not for general availability. `gmail.readonly`
+      is a restricted scope, so publication means Google's security
+      assessment — start it early or accept beta-only status deliberately.
+   8. **Session table growth** (#14). Every login writes a row; no
+      cleanup, no concurrent-session cap, no "log out other devices". Add
+      periodic deletion of expired and revoked rows before traffic
+      accumulates. This was already logged in "Known open decisions" and
+      has now been raised independently, which is a reason to stop
+      deferring it.
+
+   **Sequencing note:** items 1 and 2 are the ones that gate real users.
+   Everything else can follow. Do not let 3 and 8 be postponed
+   indefinitely on the grounds that they are unglamorous — both get worse
+   with time and traffic.
+
+3. **Real search.** Postgres full-text over merchant, item names, and
    notes, replacing today's `ILIKE` in `/api/search`. Ranking, and a
    search UI that shows *why* a receipt matched. Semantic search is
    explicitly out of scope — revisit once full-text is real and there's a
    concrete reason to want more.
-3. **Warranty and return windows, surfaced.** The schema already carries
+4. **Warranty and return windows, surfaced.** The schema already carries
    this metadata and nothing displays it. A "still under warranty" and
    "returnable until" view, plus per-receipt entry — the most direct
    answer to ROADMAP.md's own "I need to return this" use case.
-4. **Export: CSV and PDF.** Owner-scoped and streamed rather than built in
+5. **Export: CSV and PDF.** Owner-scoped and streamed rather than built in
    memory. CSV first (mechanical); PDF second, and it needs a rendering
    choice — flag that rather than picking one silently.
-5. **Tax-category tagging.** Per-receipt and per-item categories with a
+6. **Tax-category tagging.** Per-receipt and per-item categories with a
    rules layer, feeding an exportable tax summary. Builds on
    `lib/categories.ts`.
-6. **Multi-currency with historical FX.** Store the rate used at purchase
+7. **Multi-currency with historical FX.** Store the rate used at purchase
    time; never convert on read with today's rate. **Needs Omar**: an FX
    rate source — most free tiers forbid commercial use, the same licensing
    trap already logged below for the Surya OCR weights.
