@@ -30,7 +30,8 @@ describe("parseEmailReceipt", () => {
     // merchant" is reserved for an email that offers neither.
     const result = parseEmailReceipt(email("", "someone@localhost"));
     expect(result.merchant).toBe("Unknown merchant");
-    expect(result.totalMinor).toBe(0);
+    // See registry.ts: null means "no total found", distinct from zero.
+    expect(result.totalMinor).toBeNull();
     expect(result.currency).toBe("USD");
     expect(result.items).toEqual([]);
     expect(result.purchasedAt).toBeInstanceOf(Date);

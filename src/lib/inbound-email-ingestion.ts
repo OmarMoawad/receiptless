@@ -4,6 +4,13 @@ import type { InboundEmail } from "./inbound-email";
 
 export type InboundEmailIngestionResult =
   | { status: "created"; receiptId: string }
+  /**
+   * The parser could not find a total. Reported rather than stored,
+   * because a receipt with no amount is not a receipt — see registry.ts.
+   * Distinct from "duplicate" so a scan can tell the owner how much of
+   * their mail it actually understood.
+   */
+  | { status: "unparseable"; reason: string }
   | { status: "duplicate" | "unknown-mailbox" };
 
 function isUniqueConflict(error: unknown): boolean {
@@ -42,6 +49,22 @@ export async function ingestEmailForUser(userId: string, email: InboundEmail): P
       // rather than replacing it. Passing email.receivedAt here would let
       // a spoofed header both set and authorize its own purchase date.
       const parsed = parseEmailReceipt(email, new Date());
+
+      // The one field a receipt cannot do without. Previously a missing
+      // total defaulted to zero and a receipt was created anyway, so an
+      // unreadable email — or an email that was never a receipt — became a
+      // $0.00 entry in the vault and counted as a successful import.
+      //
+      // The delivery row is still written, so the message is recorded as
+      // seen and will not be re-processed on the next scan.
+      if (parsed.totalMinor === null) {
+        await tx.inboundEmailDelivery.update({
+          where: { id: delivery.id },
+          data: { adapterId: parsed.adapterId },
+        });
+        return { status: "unparseable" as const, reason: "no total could be parsed from this message" };
+      }
+
       const merchant = await tx.merchant.upsert({
         where: { name: parsed.merchant },
         update: {},
