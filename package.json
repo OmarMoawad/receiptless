@@ -10,11 +10,13 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate deploy"
+    "db:migrate": "prisma migrate deploy",
+    "check:migrations": "node scripts/check-migration-safety.mjs"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
+    "@sentry/nextjs": "^10.70.0",
     "date-fns": "^4.4.0",
     "jsqr": "^1.4.0",
     "minio": "^8.0.7",

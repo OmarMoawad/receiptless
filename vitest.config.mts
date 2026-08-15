@@ -10,6 +10,13 @@ export default defineConfig({
   test: {
     include: ["src/**/*.test.ts"],
     /**
+     * Runs before any test opens a connection. This suite is destructive
+     * against a real Postgres, so it refuses to run unless DATABASE_URL is
+     * local — see src/test/guard-local-database.ts for why a hosted
+     * database can end up in .env by accident.
+     */
+    setupFiles: ["src/test/guard-local-database.ts"],
+    /**
      * Every test file shares one real Postgres (no mocked DB — see
      * README). Vitest defaults to a worker per core, and past roughly four
      * the suite starts producing failures that have nothing to do with the
