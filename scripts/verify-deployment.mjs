@@ -176,10 +176,11 @@ function reportManualSteps() {
   record(
     "Log drain delivering",
     null,
-    "Sentry's Vercel integration was installed 2026-08-15 but delivery is UNVERIFIED — " +
-      "confirm at Vercel → Settings → Log Drains (an entry should be listed) and by " +
-      "checking a recent deploy appears under Sentry → Releases. Installing an " +
-      "integration is not the same as logs arriving.",
+    "NOT MET — log drains are a Vercel Pro feature and this account is on Hobby " +
+      "(verified in the dashboard 2026-08-15: Add Drain disabled, 'Upgrade your plan to " +
+      "enable Drains'). Error tracking is live and covers anything that throws; a drain " +
+      "would cover what does not — timeouts, hangs, platform-level failures. Revisit " +
+      "before real users depend on this.",
     true,
   );
   record("Real Gmail account completed consent and imported a receipt", null, "needs a human with a real mailbox", true);

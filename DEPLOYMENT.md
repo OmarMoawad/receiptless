@@ -320,6 +320,10 @@ is acceptable.
 
 - Rate limiting on the auth endpoints. Vercel's platform rate limiting or
   an edge middleware would be the cheapest option; not built.
+- **Log drain: not available on this plan.** Vercel Drains are Pro-only
+  and this account is on Hobby — verified in the dashboard 2026-08-15.
+  Error tracking is live; the drain half of Session 10's observability
+  criterion is unmet and recorded as such.
 - ~~No error tracking or log drain configured.~~ Sentry is wired in
   (Session 10 Part B): `src/lib/observability.ts`, with request bodies,
   cookies, headers, query *values*, emails and IPs scrubbed before an
