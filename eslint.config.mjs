@@ -12,6 +12,15 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generated Prisma client: thousands of require() imports and
+    // TypeScript suppression comments we neither wrote nor can fix.
+    // Linting it made `npm run lint` report 729 errors and rendered the
+    // whole signal useless, which is part of why CI never gated on it.
+    "src/generated/**",
+    // Agent worktrees are checkouts of this same repo — linting them
+    // double-counts every finding and reports paths that do not exist on
+    // the branch being linted.
+    ".worktrees/**",
   ]),
 ]);
 
