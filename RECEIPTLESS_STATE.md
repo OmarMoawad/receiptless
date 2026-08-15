@@ -10,7 +10,14 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-> **Next action: confirm Neon's retention window, then Phase 2 session 1.**
+> **Next action: Phase 2 session 1 — upgrade Vercel to Pro, then wire the
+> log drain.** Chosen as the milestone's first item on 2026-08-15 because
+> it is the only unmet Session 10 exit criterion and it needs a purchase
+> rather than engineering time. **Needs Omar**; nothing else in that
+> session can start first. Neon's retention window is now confirmed at
+> 6 hours — see "Backup posture".
+>
+> Superseded: **confirm Neon's retention window, then Phase 2 session 1.**
 > **Session 10 is COMPLETE** — a real Gmail account connected to
 > production and 25 real receipts imported, 0 failed. Two carry-over
 > items: the log drain, and the Neon retention window, which now matters
@@ -1721,26 +1728,71 @@ independent periodic dump, and rehearse a restore once either exists.
 
 Phase 2 is "vault maturity" (ROADMAP.md): making what's already captured
 genuinely useful, rather than capturing more of it. Ordered so each
-session stands alone, and deliberately so that none depends on the two
-open real-world gaps above — progress here isn't blocked on account
-creation.
+session stands alone.
 
-1. **Real search.** Postgres full-text over merchant, item names, and
+**Session 1 is the exception to that** — it is the one item that needs
+Omar's card rather than an agent's time, and it is deliberately first
+because it closes the only Session 10 exit criterion that went unmet.
+
+1. **Upgrade Vercel to Pro, and finish the observability criterion.**
+   **Decided 2026-08-15, first item of the milestone.**
+
+   Session 10 required error tracking **and** a log drain. Error tracking
+   is live and proved itself the day it landed, naming a bad Google client
+   secret from a single captured event after two wrong guesses from
+   outside. The drain is unmet and **not fixable by configuration** —
+   Vercel Drains are a Pro feature and this account is on Hobby, verified
+   in the dashboard (Add Drain disabled, *"Upgrade your plan to enable
+   Drains"*).
+
+   **Needs Omar**: the upgrade itself is a purchase (~$20/month at time of
+   writing). Nothing else in this session can start until it exists.
+
+   Then, and only then, the agent work is small and checkable:
+
+   - Add a drain for **Function** and **Edge** sources.
+   - Point it at an endpoint that accepts one. Sentry's DSN is *not* a log
+     drain endpoint — this needs a provider that accepts drains (Axiom,
+     Better Stack, Datadog) or Sentry's own drain support if it exposes
+     one by then. **Decide deliberately rather than defaulting**, the same
+     way hosting and storage were decided.
+   - **Verify logs actually arrive.** Installing an integration is not the
+     same as logs arriving — that exact mistake was made and caught on
+     2026-08-15, when Sentry's Vercel integration was installed and had
+     created no drain at all. Trigger a `console.error` through the Gmail
+     callback and confirm it lands at the destination.
+   - Update `scripts/verify-deployment.mjs` to move "Log drain delivering"
+     from the manual list to an automated check where possible, and mark
+     the criterion met in this file **with the evidence**, not with an
+     assertion.
+
+   What this buys, stated plainly so the cost is judged honestly: Sentry
+   already covers anything that **throws**. A drain covers what does not —
+   a function that times out, a request that hangs, a platform-level
+   failure, and the logs surrounding an incident. Vercel's built-in
+   runtime logs are not a substitute: short retention, no alerting.
+
+   Worth checking at the same time, since the plan is the gate for several
+   of them: Pro also lifts function duration limits and adds password
+   protection for preview deployments — the latter matters once previews
+   hold anything real.
+
+2. **Real search.** Postgres full-text over merchant, item names, and
    notes, replacing today's `ILIKE` in `/api/search`. Ranking, and a
    search UI that shows *why* a receipt matched. Semantic search is
    explicitly out of scope — revisit once full-text is real and there's a
    concrete reason to want more.
-2. **Warranty and return windows, surfaced.** The schema already carries
+3. **Warranty and return windows, surfaced.** The schema already carries
    this metadata and nothing displays it. A "still under warranty" and
    "returnable until" view, plus per-receipt entry — the most direct
    answer to ROADMAP.md's own "I need to return this" use case.
-3. **Export: CSV and PDF.** Owner-scoped and streamed rather than built in
+4. **Export: CSV and PDF.** Owner-scoped and streamed rather than built in
    memory. CSV first (mechanical); PDF second, and it needs a rendering
    choice — flag that rather than picking one silently.
-4. **Tax-category tagging.** Per-receipt and per-item categories with a
+5. **Tax-category tagging.** Per-receipt and per-item categories with a
    rules layer, feeding an exportable tax summary. Builds on
    `lib/categories.ts`.
-5. **Multi-currency with historical FX.** Store the rate used at purchase
+6. **Multi-currency with historical FX.** Store the rate used at purchase
    time; never convert on read with today's rate. **Needs Omar**: an FX
    rate source — most free tiers forbid commercial use, the same licensing
    trap already logged below for the Surya OCR weights.
