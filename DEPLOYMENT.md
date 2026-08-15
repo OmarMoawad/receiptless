@@ -148,6 +148,13 @@ is `false` and both arrays are empty.
 
 ## 6. Backups — do not skip
 
+> **Current state (2026-08-15):** Neon history retention on this project
+> is **6 hours**, confirmed in the console. Point-in-time restore is
+> possible only inside that window; there is no daily snapshot behind it
+> on this tier. **A restore has never been performed** — the window is
+> confirmed, the ability to use it is not. See RECEIPTLESS_STATE.md's
+> "Backup posture" for the standing decision and when to revisit.
+
 Hosted Postgres providers vary: some retain point-in-time recovery only on
 paid tiers. Confirm the retention window before real receipts exist, not
 after. This is part of the hard gate above, not an optimization.
