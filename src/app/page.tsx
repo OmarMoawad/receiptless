@@ -59,6 +59,14 @@ export default async function Home() {
       <main className="flex flex-col items-center gap-2 p-6 text-center">
         <h1 className="text-xl font-semibold">receiptless</h1>
         <p className="text-neutral-500 text-sm">Sign in to see your spend.</p>
+        {/*
+          This page told people to sign in and offered no way to do it —
+          there was no sign-in UI in the application at all until the
+          Session 10 slice. A dead end with instructions is still a dead end.
+        */}
+        <Link href="/signin" className="rounded bg-emerald-600 text-white px-4 py-2 text-sm">
+          Sign in or create an account
+        </Link>
       </main>
     );
   }

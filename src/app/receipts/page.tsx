@@ -28,6 +28,9 @@ export default async function ReceiptsPage({
         <p className="text-neutral-500 text-sm">
           Your receipts are only visible while signed in.
         </p>
+        <Link href="/signin" className="rounded bg-emerald-600 text-white px-4 py-2 text-sm">
+          Sign in or create an account
+        </Link>
       </main>
     );
   }
