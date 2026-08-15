@@ -213,7 +213,21 @@ Neon's point-in-time restore is the last resort for a genuinely bad
 migration. **Confirm your retention window before you need it** — on the
 free tier it is short, and a restore window that expired is not a backup.
 
-### Rehearsal — do this once, now, before real data exists
+### Rehearsal — DONE, 2026-08-15
+
+Performed on the live deployment while the database was still empty.
+Rollback was visible in under 5 s; **recovery took 42 s** from clicking
+promote to `/api/health` reporting `status: "ok"`, polled every 5 s. The
+rolled-back build correctly returned 503 rather than serving broken.
+
+Full record in RECEIPTLESS_STATE.md, including what the rehearsal did
+*not* cover: both builds were the same commit differing only in
+environment, so no migration boundary was crossed.
+
+Repeat this whenever the release process changes. The steps below are the
+procedure.
+
+### Rehearsal steps
 
 The rehearsal is the deliverable, not the document. With no real receipts
 in the database yet, the cost of a mistake is zero, which is exactly why

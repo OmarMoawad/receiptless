@@ -10,7 +10,14 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-> **Next action: Session 10 Part B — create the accounts, then deploy.**
+> **Next action: finish Session 10's slice — connect a real Gmail account.**
+> receiptless is **deployed and verified**: https://receiptless-theta.vercel.app,
+> 12/12 automated checks, rollback rehearsed at 42 s recovery. What remains
+> is the log drain, the Neon retention window, and the one thing all of it
+> was scaffolding for — a real receipt arriving from a real mailbox. See
+> "Session 10 Part B — deployed and verified" below.
+>
+> Superseded: **Session 10 Part B — create the accounts, then deploy.**
 > Part A is done (2026-08-14). Part B's *code* half is done (2026-08-15):
 > error tracking, a rollback procedure, and a verification script all
 > exist and are exercised locally. What remains is the half that needs
@@ -1470,6 +1477,77 @@ incident.
 219 with the observability suite), typecheck clean, `next build` clean
 with the Sentry wrapper, on branch `agent/session-10-part-b`, base
 `0caae7c`, 2026-08-15 against local Postgres 16 on `localhost:5433`.
+
+## Session 10 Part B — deployed and verified (2026-08-15)
+
+**receiptless is deployed and serving from real infrastructure**:
+https://receiptless-theta.vercel.app — Vercel (fra1), Neon Postgres in
+`eu-central-1` (pooled connection), Cloudflare R2, Sentry.
+
+### Verification — 12/12 automated checks
+
+`node scripts/verify-deployment.mjs https://receiptless-theta.vercel.app`,
+run 2026-08-15 17:17Z against the deployment built from `703e25f`:
+
+```
+status: "ok", database: "ok", missingConfig: [], insecureConfig: [],
+merchantApiEnabled: false, errorTrackingEnabled: true          HTTP 200
+```
+
+Every one of these was previously asserted from a local build and is now
+demonstrated against the public internet:
+
+- **Database reachable** from the deployment — Neon, pooled, over TLS.
+- **The encryption-key gate is satisfied.** `insecureConfig` is empty, so
+  the committed dev key is not in use. Before the real key was set, the
+  live deployment reported exactly `insecureConfig: ["EMAIL_OAUTH_ENCRYPTION_KEY"]`
+  and refused readiness with a 503 — the gate was observed *firing in
+  production*, not only in a local simulation.
+- **The unauthenticated merchant endpoint returns 404 to the public
+  internet.** Confirmed by an actual `POST` from outside, not by trusting
+  the flag the health endpoint reports about itself.
+- **The readiness endpoint leaks no configuration values.**
+- **HSTS**: `max-age=63072000; includeSubDomains; preload`, set by Vercel.
+
+### Rollback — rehearsed, not just documented (2026-08-15 17:20Z)
+
+The criterion required this be performed once. It was, on the live
+deployment, while the database was still empty:
+
+| Step | Measured |
+| --- | --- |
+| Promote previous deployment | rollback visible in **under 5 s** (first poll already showed it) |
+| Rolled-back state | `HTTP 503`, `database: unreachable`, all config missing — correctly reported as unfit to serve |
+| Promote good deployment back | **42 s** from click to `status: "ok"`, by polling every 5 s |
+
+**42 seconds is the real recovery time.** That is the number worth knowing
+before an incident rather than during one.
+
+Two things this rehearsal establishes: promoting an older deployment takes
+effect essentially instantly, and `/api/health` *detects* the rollback
+rather than silently serving a broken app. Together those are what make
+"promote the last good deployment" a recovery procedure.
+
+**What it did not test, and is not claimed:** both deployments were builds
+of the same commit differing only in environment configuration, so this
+exercised neither a code difference nor — more importantly — a migration
+boundary. The genuinely dangerous case, old code meeting a newer schema,
+remains unexercised. That case is now *prevented* rather than rehearsed:
+`npm run check:migrations` runs in CI and fails on destructive migrations.
+
+### Still open
+
+- **Log drain** — not configured. Session 10 names error tracking *and* a
+  log drain; only the first exists. Error tracking is live
+  (`errorTrackingEnabled: true`).
+- **Backups/PITR retention window** — not yet confirmed in the Neon
+  dashboard, so the hard gate below is **not** satisfied and no real
+  receipt data should be treated as durable until it is.
+- **The slice itself** — no real Gmail account has completed consent, and
+  no real receipt has been imported from a real mailbox. Everything above
+  is the scaffolding for that path, not the path.
+- **OCR** — the Surya service has no hosting story and is not part of this
+  deployment. Photo OCR does not work in production, by decision.
 
 ## Session cadence for Phase 2 — re-baselined 2026-08-13
 
