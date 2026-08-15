@@ -245,6 +245,48 @@ this is the moment:
 Until step 6 exists in the state file, this criterion is **not met**, and
 should be reported as not met rather than as "documented".
 
+## 8. Commit identity — Vercel will refuse to deploy without it
+
+Vercel blocks a deployment when it cannot tie the commit's author email to
+an account with access to the team. Hit for real on 2026-08-15:
+
+```
+Vercel didn't deploy this pull request.
+GitHub couldn't verify an account for commit 356925c.
+```
+
+**Cause:** this repository had **no `user.email` configured at all**, so
+git fell back to a machine-derived address (`Omar@Noureldins-MacBook-Air.local`)
+that belongs to no account anywhere.
+
+It went unnoticed for nine sessions because production deploys kept
+working: merging through GitHub's web UI creates a merge commit authored
+by GitHub with the account's own noreply address, and Vercel was
+satisfied by *that*. Only pull-request previews, which are checked against
+the branch's head commit, were blocked. A green production deploy was
+hiding a broken identity on every commit.
+
+**Fix**, in each repository:
+
+```bash
+git config user.email "<id>+<user>@users.noreply.github.com"
+```
+
+The GitHub noreply address is the right choice: it is tied to the account,
+so Vercel can verify it, and it keeps a real address out of a public git
+history.
+
+Existing commits need re-authoring — setting the config does not change
+them:
+
+```bash
+git rebase origin/main --exec 'git commit --amend --no-edit --reset-author'
+```
+
+Then force-push the branch. **Note:** GitHub sometimes does not update an
+open PR's head after a force-push. Pushing an ordinary commit afterwards
+makes it re-sync.
+
 ## Still open
 
 - Rate limiting on the auth endpoints. Vercel's platform rate limiting or
