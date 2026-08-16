@@ -66,7 +66,8 @@ database.
 | `GOOGLE_OAUTH_CLIENT_SECRET` | if Gmail scanning | |
 | `GOOGLE_OAUTH_REDIRECT_URI` | if Gmail scanning | Must match Google exactly |
 | `EMAIL_OAUTH_ENCRYPTION_KEY` | **if Gmail scanning** | Generate with `openssl rand -base64 32`. The built-in fallback is committed to this repo and is refused in any deployed environment. **Part of the all-or-nothing Gmail group — see the warning below** |
-| `OCR_SERVICE_URL` | if OCR | The self-hosted Surya service |
+| `OCR_SERVICE_URL` | if OCR | The self-hosted Surya service. Unset means automatic photo reading is **off and says so**, rather than failing at upload time |
+| `OCR_NONCOMMERCIAL_ACKNOWLEDGED` | if OCR | Must be exactly `true`. See section 3c before setting it — this is a licensing acknowledgement, not a feature flag |
 | `CRON_SECRET` | **yes** | Generate with `openssl rand -base64 32`. Vercel Cron sends it as `Authorization: Bearer …`; the maintenance job refuses to run in a deployed environment without it, so an unset value means housekeeping silently never happens |
 
 `missingProductionConfig` (`src/lib/deployment.ts`) enforces the required
@@ -146,6 +147,28 @@ needs Pro (section 1 of Phase 2's cadence).
 concurrent sessions per user, and whether to offer "log out other
 devices". Deleting rows nobody can authenticate with needs no product
 decision; those two do.
+
+## 3c. Automatic photo reading is off unless two things are true
+
+Review findings #9 and #10. The Surya OCR service is not deployed
+anywhere, and its model weights (`vikp/surya_det3`, `vikp/surya_rec2`)
+are licensed **CC-BY-NC-SA-4.0 — non-commercial**.
+
+The licensing question is Omar's and does not improve by being deferred:
+replace the weights, license them, or exclude the feature from commercial
+use (ROADMAP.md's post-production revisit list). Until then the app does
+the two things that do not need that answer — it never offers a feature
+that is not there, and it never lets the model be enabled by accident:
+
+- `OCR_SERVICE_URL` unset → the capture screen says automatic reading is
+  off, the photo still attaches, and the details are typed in. No upload
+  is sent to a route that has already decided to refuse it.
+- `OCR_SERVICE_URL` set but `OCR_NONCOMMERCIAL_ACKNOWLEDGED` not exactly
+  `true` → still off, and the reason names the licence.
+
+Setting `OCR_NONCOMMERCIAL_ACKNOWLEDGED=true` is a statement that this
+particular deployment is not a commercial use, or that the weights have
+been replaced or licensed. It is not a way to make the warning go away.
 
 ## 4. Migrations — a release step, not a build step
 

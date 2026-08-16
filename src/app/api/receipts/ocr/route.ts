@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { MAX_IMAGE_BYTES, sniffImageContentType } from "@/lib/storage";
 import { getOcrClient } from "@/lib/ocr-client";
+import { ocrAvailability } from "@/lib/deployment";
 import { enforceRateLimit } from "@/lib/rate-limit";
 
 /**
@@ -29,6 +30,16 @@ export async function POST(request: NextRequest) {
   const user = await getCurrentUser(request);
   if (!user) return NextResponse.json({ error: "Sign in required" }, { status: 401 });
 
+  // Review findings #9/#10: say the feature is off, before reading an
+  // upload the app has already decided it will not process. A 502 after
+  // the user has waited for their photo to upload describes a broken
+  // service; this describes a deployment that deliberately does not offer
+  // the feature, which is a different thing and the true one.
+  const availability = ocrAvailability();
+  if (!availability.available) {
+    return NextResponse.json({ error: availability.reason, unavailable: true }, { status: 503 });
+  }
+
   const formData = await request.formData().catch(() => null);
   const file = formData?.get("file");
   if (!(file instanceof Blob)) {
@@ -55,4 +66,16 @@ export async function POST(request: NextRequest) {
     // rather than blocking receipt capture on it.
     return NextResponse.json({ error: "OCR service is currently unavailable." }, { status: 502 });
   }
+}
+
+/**
+ * Whether this deployment offers automatic photo reading. Read by
+ * `/receipts/new`'s server component so the capture screen can label the
+ * option honestly instead of discovering it at upload time.
+ */
+export async function GET(request: NextRequest) {
+  const user = await getCurrentUser(request);
+  if (!user) return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+
+  return NextResponse.json(ocrAvailability());
 }
