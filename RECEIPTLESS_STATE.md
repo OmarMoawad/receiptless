@@ -10,15 +10,28 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-> **Next action: Phase 2 session 2b — the rest of the external review
+> **Next action: Phase 2 session 1 — upgrade Vercel to Pro, then wire
+> the log drain. It needs Omar and nothing else in it can start.**
+> Session 2b is done (2026-08-16) and closed every review item that an
+> agent can close without an account, a purchase, or production
+> credentials: independent backups with a rehearsed restore (#1),
+> retryable parsing and the review list (#6/#7), plausibility checks and
+> the amount-parsing bug they uncovered (#8), OCR labelled unavailable
+> (#9/#10 engineering half), a real-browser end-to-end journey (#12), and
+> scheduled session cleanup (#14).
+>
+> **What is left of the review is now exactly the set that needs Omar**,
+> and it is short: the Vercel Pro purchase and the log drain (#3), a Neon
+> retention decision and a production restore (#1's remaining half), the
+> Surya weights licensing question (#9/#10), running
+> `scripts/repair-legacy-receipts.mjs` against production (#6's existing
+> rows), OAuth publication (#13), and the session-cap product decision
+> (#14). After that, Phase 2 sessions 3–7 are ordinary feature work.
+>
+> Superseded: **Phase 2 session 2b — the rest of the external review
 > list.** Session 2a is done (2026-08-16): **rate limiting and a
 > consistent trusted-origin policy**, review findings #4 and #5, the two
-> the sequencing note below calls the ones that gate real users. What is
-> left of the review, in its own priority order, is backup/restore
-> protection (#1, needs a Neon decision), the existing-data repair and
-> retryable parsing (#6/#7/#8), OCR hosting and licensing (#9/#10), a
-> browser-level end-to-end test (#12), OAuth publication (#13), and
-> session-table cleanup (#14). See "Session 2a" below.
+> the sequencing note below calls the ones that gate real users.
 >
 > Still true, and still first in the cadence: **session 1 — upgrade
 > Vercel to Pro, then wire the log drain — needs Omar** and nothing else
@@ -1894,9 +1907,47 @@ because it closes the only Session 10 exit criterion that went unmet.
         hang a timer on. A Vercel cron would be better and does not
         exist yet — see #8 below, which is the same class of problem.
 
-      **Session 2b — the rest of the review list:** items 1 and 3 through
-      8 in this list, unchanged. Sequenced after 2a because 2a is what
-      the review's own priority order put first.
+      **Session 2b — the rest of the review list. DONE 2026-08-16**,
+      for every part that does not need an account, a purchase, or
+      production credentials. What each item actually closed, and what it
+      pointedly did not:
+
+      - **#1 backups.** `scripts/backup-database.mjs` writes an
+        independent dump with a checksum;
+        `scripts/verify-backup-restore.mjs` restores it into a scratch
+        database and compares per-table row counts. **Rehearsed
+        2026-08-16 — seven tables, matching counts, PASS.** RPO and RTO
+        are now written down as targets (DEPLOYMENT.md §6) instead of
+        implied. **Not closed:** a restore of the *production* Neon
+        database, extending retention past six hours, and scheduling the
+        dump — a Vercel cron cannot write a durable file anywhere.
+      - **#6/#7 retryable parsing.** Unreadable mail is retained on its
+        delivery row and reprocessable rather than marked seen and lost;
+        `GET /api/email/deliveries` shows the owner what was skipped and
+        why. **Not closed:** the rows already in production —
+        `scripts/repair-legacy-receipts.mjs` does it, dry-run by default,
+        and needs Omar to point it at production.
+      - **#8 plausibility — and a real bug it found.** Adding the range
+        check surfaced something worse than the check was for:
+        `AMOUNT_AT_END` matched a *suffix* of a longer digit run, so
+        "Total: 88123456789.00" became a confident, plausible, completely
+        wrong £789.00 receipt. A wrong amount in a vault is worse than a
+        missing one, because nothing about it looks wrong later. **Not
+        closed:** confidence scoring and real anonymised fixtures, both
+        of which need Omar's actual receipt mail.
+      - **#9/#10 OCR.** Automatic photo reading is now off unless a
+        deployment both configures a service and acknowledges that the
+        model weights are non-commercial — and the capture screen says
+        so instead of failing after the upload. **Not closed:** the
+        licensing question itself, which is Omar's and does not improve
+        by being deferred.
+      - **#12 browser-level test.** Two Playwright journeys against a
+        production build, asserting no uncaught page error and no console
+        error anywhere. Checked by breaking it on purpose. CI runs it.
+      - **#14 session growth.** A daily maintenance cron deletes sessions
+        dead for more than a week and stale rate-limit counters. **Not
+        closed:** whether to cap concurrent sessions or offer "log out
+        other devices" — product decisions, still Omar's.
    3. **Existing-data repair, and retryable parsing** (#6, #7, #8). The
       parser no longer imports totals it could not read, but the `$0.00`
       and date-as-merchant rows from the first scan **are still in
