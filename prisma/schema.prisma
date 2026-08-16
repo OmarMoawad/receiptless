@@ -236,3 +236,32 @@ model ReceiptItem {
   @@index([receiptId])
   @@index([name])
 }
+
+// Fixed-window rate limit counters. One row per (bucket, subject) pair,
+// reused for the life of that pair.
+//
+// The design is shared with IDent (`apps/api/src/rate-limit/`), not just
+// similar to it: the same bucket names, the same limits, the same single
+// atomic UPSERT, the same 429 + Retry-After shape. One external review
+// raised "no rate limiting" against both repos and asked for one approach
+// across both, and two designs for one property is how the two repos
+// drift.
+//
+// In Postgres rather than in memory because this app runs on Vercel:
+// every request may land on a different instance, so a per-process
+// counter would limit nothing at all.
+//
+// Deliberately holds no identifying data beyond what it must — a subject
+// is an IP or a *hash* of a session token, never the token itself. A dump
+// of this table is a list of counters, not a set of credentials.
+model RateLimitCounter {
+  bucket  String
+  subject String
+  // Start of the current window; moves forward only when it expires.
+  windowStart DateTime @default(now())
+  count       Int      @default(0)
+
+  @@id([bucket, subject])
+  // Supports the periodic prune, which deletes by age across all buckets.
+  @@index([windowStart])
+}

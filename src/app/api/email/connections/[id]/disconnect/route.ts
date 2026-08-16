@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { disconnectGmail } from "@/lib/gmail-connection";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const limited = await enforceRateLimit(request, ["default-write"]);
+  if (limited) return limited;
+
   const user = await getCurrentUser(request);
   if (!user) return NextResponse.json({ error: "Sign in required" }, { status: 401 });
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { setSessionCookie } from "@/lib/auth-cookie";
 import { InvalidUsernameError, UsernameTakenError, WeakPasswordError, register } from "@/lib/auth-service";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 const registerSchema = z.object({
   username: z.string().trim().min(1),
@@ -21,6 +22,13 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
+
+  // Before `register`, which hashes with argon2 — same reasoning as the
+  // login route. Per-IP only: there is no account yet to key on, and a
+  // per-username counter here would let anyone reserve a name they do
+  // not own by failing against it.
+  const limited = await enforceRateLimit(request, ["auth-register"]);
+  if (limited) return limited;
 
   try {
     const session = await register(parsed.data);

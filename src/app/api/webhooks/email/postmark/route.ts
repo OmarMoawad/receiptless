@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { ingestInboundEmail } from "@/lib/inbound-email-ingestion";
 import { normalizePostmarkInbound } from "@/lib/postmark-inbound";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 function digest(value: string): Buffer {
   return createHash("sha256").update(value).digest();
@@ -20,6 +21,9 @@ function hasValidBasicAuth(request: NextRequest, username: string, password: str
 }
 
 export async function POST(request: NextRequest) {
+  const limited = await enforceRateLimit(request, ["inbound-email"]);
+  if (limited) return limited;
+
   const username = process.env.POSTMARK_WEBHOOK_USERNAME;
   const password = process.env.POSTMARK_WEBHOOK_PASSWORD;
   if (!username || !password) {

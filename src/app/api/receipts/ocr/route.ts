@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { MAX_IMAGE_BYTES, sniffImageContentType } from "@/lib/storage";
 import { getOcrClient } from "@/lib/ocr-client";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 /**
  * Session 5 follow-up (2026-08-12): runs OCR against a picked receipt
@@ -19,6 +20,12 @@ import { getOcrClient } from "@/lib/ocr-client";
  * duplicating that logic.
  */
 export async function POST(request: NextRequest) {
+  // Ahead of the session check on purpose: an unauthenticated flood still
+  // costs a session lookup per request, and this is the route whose whole
+  // reason for being gated is that the work behind it is expensive.
+  const limited = await enforceRateLimit(request, ["receipt-ocr"]);
+  if (limited) return limited;
+
   const user = await getCurrentUser(request);
   if (!user) return NextResponse.json({ error: "Sign in required" }, { status: 401 });
 
