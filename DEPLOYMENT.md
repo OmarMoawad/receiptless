@@ -67,6 +67,7 @@ database.
 | `GOOGLE_OAUTH_REDIRECT_URI` | if Gmail scanning | Must match Google exactly |
 | `EMAIL_OAUTH_ENCRYPTION_KEY` | **if Gmail scanning** | Generate with `openssl rand -base64 32`. The built-in fallback is committed to this repo and is refused in any deployed environment. **Part of the all-or-nothing Gmail group — see the warning below** |
 | `OCR_SERVICE_URL` | if OCR | The self-hosted Surya service |
+| `CRON_SECRET` | **yes** | Generate with `openssl rand -base64 32`. Vercel Cron sends it as `Authorization: Bearer …`; the maintenance job refuses to run in a deployed environment without it, so an unset value means housekeeping silently never happens |
 
 `missingProductionConfig` (`src/lib/deployment.ts`) enforces the required
 rows and the all-or-nothing rule for inbound email — a half-configured
@@ -119,6 +120,32 @@ per hour, from whichever request notices. That is deliberate (serverless
 has no long-lived process for a timer) and it is weaker than a scheduled
 job: an instance that never gets a request never prunes. A Vercel cron is
 the real fix and does not exist yet.
+
+## 3b. The daily maintenance job
+
+`vercel.json` schedules `GET /api/cron/maintenance` at 04:00 UTC. It
+deletes `Session` rows that expired or were revoked more than a week ago
+(review finding #14 — every login wrote a row and nothing ever deleted
+one) and rate-limit counters whose window ended more than a day ago.
+
+The week is deliberate: a session past its expiry authenticates nobody,
+but it is exactly the row someone asks about after "did somebody get into
+my account?", and deleting on expiry throws that away.
+
+**`CRON_SECRET` must be set**, or the endpoint returns 404 in a deployed
+environment and nothing is ever cleaned up. It returns 404 rather than
+401 so an unauthenticated caller learns nothing about whether the
+endpoint exists.
+
+Check it ran: the response body reports `sessionsDeleted` and
+`rateLimitCountersDeleted`, and Vercel's cron log shows the invocation.
+Nothing alerts if it stops running — that needs the log drain, which
+needs Pro (section 1 of Phase 2's cadence).
+
+**Still Omar's decision, not closed by this job:** whether to cap
+concurrent sessions per user, and whether to offer "log out other
+devices". Deleting rows nobody can authenticate with needs no product
+decision; those two do.
 
 ## 4. Migrations — a release step, not a build step
 
