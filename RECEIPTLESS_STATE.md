@@ -1927,7 +1927,15 @@ because it closes the only Session 10 exit criterion that went unmet.
         why. **Not closed:** the rows already in production —
         `scripts/repair-legacy-receipts.mjs` does it, dry-run by default,
         and needs Omar to point it at production.
-      - **#8 plausibility — and a real bug it found.** Adding the range
+      - **#8 plausibility — and a real bug it found.** **Production data
+        may be affected and `repair-legacy-receipts.mjs` cannot find it**
+        — a wrong-but-plausible total looks exactly like a right one.
+        `scripts/audit-suspect-totals.mjs` (read-only, no `--apply`)
+        re-reads each retained message and flags receipts whose stored
+        total is exactly what the bug would have produced. **Needs Omar
+        to run it against production.** Receipts whose message was not
+        retained cannot be checked this way at all; those need the source
+        mail read by hand. Adding the range
         check surfaced something worse than the check was for:
         `AMOUNT_AT_END` matched a *suffix* of a longer digit run, so
         "Total: 88123456789.00" became a confident, plausible, completely
