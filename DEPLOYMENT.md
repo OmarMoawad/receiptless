@@ -82,15 +82,43 @@ Postmark setup would mean a webhook reachable without both credentials.
 
 ## 3. The merchant endpoint is closed by default
 
-`POST /api/merchant/receipts` is unauthenticated and unrate-limited: it
-creates database rows and claim tokens for anyone who can reach it. It
-exists to simulate a POS terminal until Phase 3's merchant API keys land.
+`POST /api/merchant/receipts` is unauthenticated: it creates database
+rows and claim tokens for anyone who can reach it. It exists to simulate
+a POS terminal until Phase 3's merchant API keys land. Since 2026-08-16
+it is rate limited like every other write (section 3a), which bounds the
+damage but does not authenticate anyone — the env gate below is still
+the control that matters.
 
 It is therefore **disabled automatically in any deployed environment** and
 returns 404 there. Locally it stays on with no configuration. Only set
 `MERCHANT_API_ENABLED=true` on a deployment you are deliberately using for
 a demo, and unset it afterwards. The flag fails closed — only the exact
 string `true` enables it.
+
+## 3a. Rate limiting depends on the proxy in front of you
+
+Every write path and both argon2 paths (login, registration) are rate
+limited by a fixed-window counter in Postgres — `src/lib/rate-limit/`,
+and the `RateLimitCounter` table, which the migration in section 4
+creates. Two things about it are deployment properties rather than code
+properties, so they belong here:
+
+- **Client IPs come from `x-forwarded-for`, first entry.** On Vercel that
+  header is set by the platform and is trustworthy. Behind any other
+  proxy, confirm the proxy sets it and strips a client-supplied one —
+  otherwise a caller can forge it and evade every IP-keyed limit. If this
+  ever runs somewhere that sets no such header, all callers collapse onto
+  a single `unknown` subject and one visitor's traffic throttles
+  everybody's.
+- **`RATE_LIMIT_ENFORCE` should not be set in production.** Enforcement
+  is on by default everywhere except the test suite. `0`/`false` turns it
+  off, which is a switch for a local experiment, never for a deployment.
+
+Old counter rows are pruned opportunistically — at most once per instance
+per hour, from whichever request notices. That is deliberate (serverless
+has no long-lived process for a timer) and it is weaker than a scheduled
+job: an instance that never gets a request never prunes. A Vercel cron is
+the real fix and does not exist yet.
 
 ## 4. Migrations — a release step, not a build step
 

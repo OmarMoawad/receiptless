@@ -10,7 +10,23 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-> **Next action: Phase 2 session 1 — upgrade Vercel to Pro, then wire the
+> **Next action: Phase 2 session 2b — the rest of the external review
+> list.** Session 2a is done (2026-08-16): **rate limiting and a
+> consistent trusted-origin policy**, review findings #4 and #5, the two
+> the sequencing note below calls the ones that gate real users. What is
+> left of the review, in its own priority order, is backup/restore
+> protection (#1, needs a Neon decision), the existing-data repair and
+> retryable parsing (#6/#7/#8), OCR hosting and licensing (#9/#10), a
+> browser-level end-to-end test (#12), OAuth publication (#13), and
+> session-table cleanup (#14). See "Session 2a" below.
+>
+> Still true, and still first in the cadence: **session 1 — upgrade
+> Vercel to Pro, then wire the log drain — needs Omar** and nothing else
+> in it can start. Session 2a was done ahead of it because it needed no
+> purchase; that ordering is a fact about who can do what, not a demotion
+> of the drain.
+>
+> Superseded: **Phase 2 session 1 — upgrade Vercel to Pro, then wire the
 > log drain.** Chosen as the milestone's first item on 2026-08-15 because
 > it is the only unmet Session 10 exit criterion and it needs a purchase
 > rather than engineering time. **Needs Omar**; nothing else in that
@@ -1785,7 +1801,11 @@ because it closes the only Session 10 exit criterion that went unmet.
    hold anything real.
 
 2. **Act on the external review (2026-08-15).** **Decided by Omar as the
-   item immediately after the Pro upgrade.**
+   item immediately after the Pro upgrade.** Split into **2a (done,
+   2026-08-16)** and **2b (open)** — the same way session 10 became Part
+   A/Part B and IDent's session 22 became 22b, because one entry covering
+   eight findings cannot be either finished or honestly reported as
+   partly finished.
 
    An external review of `main` at `5d31d658` (CI passing, dependency
    audit clean) raised 14 findings. Its verdict: *"reasonable as a
@@ -1814,11 +1834,69 @@ because it closes the only Session 10 exit criterion that went unmet.
       dumps; **perform and document a real restore**; define acceptable
       RPO and RTO explicitly rather than inheriting whatever the tier
       gives.
-   2. **Authentication throttling and CSRF** (#4, #5). No rate limiting on
-      login or registration — password guessing and argon2 resource
-      exhaustion are both open. Apply a consistent trusted-origin or
-      CSRF-token policy across login, registration, OAuth mutations,
-      logout, receipt creation and upload, scan, and disconnect.
+   2. ~~**Authentication throttling and CSRF** (#4, #5).~~ **Done
+      2026-08-16 — this is session 2a.** Rate limiting is a fixed-window
+      counter in Postgres (`src/lib/rate-limit/`), keyed by
+      `(bucket, subject)` and incremented by a single atomic
+      `INSERT ... ON CONFLICT DO UPDATE ... RETURNING`. In Postgres and
+      not in memory because this runs on Vercel, where consecutive
+      requests land on different instances and a per-process counter
+      would limit nothing. One statement and not read-then-write because
+      that race is worst exactly when a flood is happening — a test fires
+      20 concurrent requests at a limit of 5 and asserts that precisely 5
+      pass.
+
+      **The design is shared with IDent, which the review asked for.**
+      Same bucket names, same limits, same 429 + `Retry-After`, same
+      atomic statement; IDent's copy is `apps/api/src/rate-limit/`. The
+      two repos now have one answer to this, not two.
+
+      Login is limited **per-username as well as per-IP**, which is what
+      actually stops credential stuffing — per-IP alone does nothing
+      against a spread-out attempt on one account. **The cost, recorded
+      rather than buried:** someone can spend failures to lock a known
+      username out of login for the window. It is per-window rather than
+      cumulative, and unlike IDent this app has no passkey path as a
+      second way in — worth knowing before that number is lowered.
+
+      The origin policy is now **one middleware** (`src/middleware.ts`)
+      over every mutating method, replacing three call sites that all
+      came from session 3's claim flow. GET is deliberately not checked:
+      the Gmail OAuth callback is a top-level redirect that legitimately
+      arrives with a cross-site `Referer`, and checking it would break
+      connecting an account every time. Server-to-server callers
+      (Postmark, a POS terminal) send neither header and are unaffected;
+      their control is their own credential, which is the right one for a
+      non-browser caller.
+
+      **What is honestly weaker than it looks, stated rather than
+      discovered later:**
+
+      - **Enforcement is off inside the test suite** unless a test asks
+        for it (`RATE_LIMIT_ENFORCE=1`). Every test file shares one
+        Postgres and no test request carries a client IP, so a
+        suite-wide limit would make unrelated tests fail each other in
+        exactly the shape this repo has twice misread as a regression.
+        The consequence is real: the ordinary route tests prove nothing
+        about throttling, and only `rate-limit.test.ts` exercises the
+        enforced path.
+      - **The limits cannot live in middleware**, because Next runs
+        middleware on the edge runtime and Prisma cannot follow, so each
+        mutating handler calls `enforceRateLimit` itself. A coverage test
+        asserts every mutating API route does — it is the stand-in for
+        IDent's single Fastify hook, and it was checked by removing one
+        call and watching it fail.
+      - **`x-forwarded-for` is trusted**, which is correct on Vercel
+        (the platform sets it) and would be wrong behind a proxy that
+        does not. Recorded in DEPLOYMENT.md.
+      - **Counter rows are pruned opportunistically**, at most once per
+        instance per hour, because Vercel has no long-lived process to
+        hang a timer on. A Vercel cron would be better and does not
+        exist yet — see #8 below, which is the same class of problem.
+
+      **Session 2b — the rest of the review list:** items 1 and 3 through
+      8 in this list, unchanged. Sequenced after 2a because 2a is what
+      the review's own priority order put first.
    3. **Existing-data repair, and retryable parsing** (#6, #7, #8). The
       parser no longer imports totals it could not read, but the `$0.00`
       and date-as-merchant rows from the first scan **are still in
