@@ -208,8 +208,33 @@ model InboundEmailDelivery {
   adapterId         String?
   createdAt         DateTime @default(now())
 
+  // Review findings #6/#7. A delivery whose total could not be parsed
+  // still wrote this row — which is correct for idempotency and was
+  // wrong for everything else: the row marks the message seen, the Gmail
+  // cursor moves past it, and a better parser can never revisit it. The
+  // message was silently unreachable for good.
+  //
+  // "imported" — a receipt exists (receiptId is set).
+  // "unparsed" — no total could be read; retained for reprocessing.
+  // "discarded" — reprocessing gave up, or the owner said it is not a
+  //               receipt. Kept as a tombstone so it is not re-fetched.
+  status        String    @default("imported")
+  failureReason String?
+  attempts      Int       @default(0)
+  lastAttemptAt DateTime?
+
+  /**
+   * The message itself, retained **only** while status is "unparsed", so
+   * a later parser can be run against it without re-fetching from Gmail
+   * (which forwarded mail could not do at all — Postmark keeps nothing).
+   * Cleared the moment it parses or is discarded, so this is a work
+   * queue, not an archive of everything anyone ever sent.
+   */
+  retainedEmail Json?
+
   @@unique([provider, providerMessageId])
   @@index([userId])
+  @@index([status])
 }
 
 model ReceiptItem {
