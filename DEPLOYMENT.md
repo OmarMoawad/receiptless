@@ -226,16 +226,77 @@ is `false` and both arrays are empty.
 
 ## 6. Backups — do not skip
 
-> **Current state (2026-08-15):** Neon history retention on this project
-> is **6 hours**, confirmed in the console. Point-in-time restore is
-> possible only inside that window; there is no daily snapshot behind it
-> on this tier. **A restore has never been performed** — the window is
-> confirmed, the ability to use it is not. See RECEIPTLESS_STATE.md's
-> "Backup posture" for the standing decision and when to revisit.
+External review finding #1: six-hour point-in-time recovery, no
+independent backup, and no restore ever performed is too thin for data
+anyone would miss.
 
-Hosted Postgres providers vary: some retain point-in-time recovery only on
-paid tiers. Confirm the retention window before real receipts exist, not
-after. This is part of the hard gate above, not an optimization.
+### What we accept losing, and how long we accept being down
+
+Stated as numbers, because "we have backups" is not a recovery objective
+and cannot be checked. These are **targets chosen deliberately**, not
+measurements of a system under load:
+
+| | Target | What actually delivers it |
+| --- | --- | --- |
+| **RPO** — data we accept losing, ordinary case (bad migration, deleted rows, a mistake) | **≈ 0**, anywhere inside the last 6 hours | Neon point-in-time recovery |
+| **RPO** — catastrophic case (Neon account lost, project deleted, provider incident) | **24 hours** | A daily dump written somewhere that is not Neon |
+| **RTO** — time to be serving again | **4 hours** | Restore, then re-point `DATABASE_URL` and redeploy |
+
+The RTO is dominated by **noticing**, not by restoring. The restore
+itself took seconds against a database of this size; there is no
+alerting, so the clock starts when a human looks. Until the log drain
+exists (Phase 2 session 1, needs Pro), that is the honest bound.
+
+The catastrophic-case RPO is 24 hours **only if the daily dump is
+actually being taken**. Right now it is a script that a person runs —
+see below.
+
+### Taking an independent backup
+
+```
+DATABASE_URL=<production url> node scripts/backup-database.mjs --out ./backups
+```
+
+Writes a compressed custom-format dump and prints its size and SHA-256.
+It deliberately does not upload anywhere: where backups live is a
+decision about someone's financial history, not something a script should
+guess. On a machine with no Postgres client installed, add
+`--docker <container> --url <in-container url>`.
+
+Point-in-time recovery inside a provider is not a backup in the sense
+that matters — it does not survive the account, a billing lapse, a
+mistaken project deletion, or a provider-side incident. A dump written
+elsewhere does.
+
+### Proving it restores — **DONE, 2026-08-16**
+
+```
+node scripts/verify-backup-restore.mjs <dump> --admin-url <url> --source-url <url>
+```
+
+Restores the dump into a scratch database, compares row counts for
+`User`, `Session`, `Receipt`, `ReceiptItem`, `Merchant`,
+`InboundEmailDelivery` and `EmailConnection` against the source, and
+drops the scratch database afterwards.
+
+**First rehearsal, 2026-08-16, against the local development database:**
+0.92 MiB dump, all 7 tables restored with matching row counts (3345
+users, 2162 receipts, 388 deliveries). PASS.
+
+**Scoped honestly:** that proves the *procedure* and the *scripts* work.
+It does not prove a restore of the production Neon database, which nobody
+has attempted, and which is the one that matters. Doing it needs
+production credentials — **Omar**. The procedure is now a command to run
+rather than a plan to write.
+
+### Still open, and it needs a decision rather than more code
+
+- **Nothing schedules the dump.** `vercel.json`'s cron runs inside the
+  deployment and cannot write a file anywhere durable; a real daily
+  backup needs somewhere to run it (a laptop cron, a GitHub Action with
+  a secret, or Neon's own paid backup tier). **Omar's call.**
+- **Extending Neon retention past 6 hours is a paid tier.** Same
+  purchase decision as Vercel Pro, and worth making at the same time.
 
 ## 7. Rollback — rehearse it before you need it
 
