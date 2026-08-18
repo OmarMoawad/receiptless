@@ -37,6 +37,21 @@ const owner = ownerFlag === -1 ? null : process.argv[ownerFlag + 1];
  */
 const DATE_LIKE_MERCHANT = String.raw`^\s*(\d{1,4}[-/]\d{1,2}[-/]\d{1,4}|\d{1,2}\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?,?\s+\d{4})\s*$`;
 
+/**
+ * **`recoverable` is the reason this query is not just a WHERE clause.**
+ *
+ * Run against real production data on 2026-08-18, this script's original
+ * form would have deleted four receipts — and one of them was a genuine
+ * $22.80 invoice whose total the parser had failed to read because the
+ * whole receipt arrived on a single unwrapped line. Deleting a real
+ * receipt to tidy up a parser's mistake is a strictly worse outcome than
+ * the mistake.
+ *
+ * So a row whose retained message still contains a money-shaped number is
+ * classified `recoverable` and is **never** deleted, whatever flags are
+ * passed. A row with no money anywhere in it was not a receipt — an order
+ * confirmation, a dispatch note — and deleting it loses nothing.
+ */
 const SELECT_SUSPECT_RECEIPTS = `
   SELECT r.id,
          r."ownerId",
@@ -47,7 +62,8 @@ const SELECT_SUSPECT_RECEIPTS = `
          CASE
            WHEN r."totalMinor" = 0 THEN 'zero total'
            ELSE 'merchant name is a date'
-         END AS reason
+         END AS reason,
+         (r."rawPayload" IS NOT NULL AND r."rawPayload" ~ '[0-9]+[.,][0-9]{2}') AS recoverable
   FROM "Receipt" r
   JOIN "Merchant" m ON m.id = r."merchantId"
   LEFT JOIN "InboundEmailDelivery" d ON d."receiptId" = r.id
@@ -68,11 +84,37 @@ try {
     process.exit(0);
   }
 
-  console.log(`Found ${rows.length} suspect receipt(s):\n`);
-  for (const row of rows) {
+  const recoverable = rows.filter((row) => row.recoverable);
+  const deletable = rows.filter((row) => !row.recoverable);
+
+  console.log(`Found ${rows.length} suspect receipt(s).\n`);
+
+  if (recoverable.length > 0) {
+    console.log(`${recoverable.length} of them still contain an amount and will NOT be deleted:\n`);
+    for (const row of recoverable) {
+      console.log(
+        `  KEEP  ${row.id}  merchant=${JSON.stringify(row.merchant)}  stored=${row.totalMinor}  (${row.reason})`,
+      );
+    }
     console.log(
-      `  ${row.id}  owner=${row.ownerId}  total=${row.totalMinor}  merchant=${JSON.stringify(row.merchant)}  (${row.reason})`,
+      "\n  These are real receipts the parser could not read, not junk. Deleting them\n" +
+        "  would lose a purchase record to tidy up a parsing mistake. Fix the total\n" +
+        "  instead — by hand, or once the parser can read that shape.\n",
     );
+  }
+
+  if (deletable.length > 0) {
+    console.log(`${deletable.length} contain no amount at all and are safe to remove:\n`);
+    for (const row of deletable) {
+      console.log(
+        `  DELETE  ${row.id}  merchant=${JSON.stringify(row.merchant)}  stored=${row.totalMinor}  (${row.reason})`,
+      );
+    }
+  }
+
+  if (deletable.length === 0) {
+    console.log("\nNothing is safe to delete automatically. Exiting without changes.");
+    process.exit(0);
   }
 
   if (!apply) {
@@ -85,7 +127,8 @@ try {
   // their deliveries claiming success would be worse than not running.
   await client.query("BEGIN");
 
-  const ids = rows.map((row) => row.id);
+  // Only ever the rows with no amount in them. See `recoverable` above.
+  const ids = deletable.map((row) => row.id);
 
   /**
    * The delivery keeps existing — it is what stops the next scan
