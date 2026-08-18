@@ -189,6 +189,29 @@ glossed.
 | Did the cron stop running? | `HEARTBEAT_URL`, pinged on success | free tier |
 | Why did *this* invocation die? | **Nothing here. This is the gap.** | Pro |
 
+### Live, 2026-08-19 — with the evidence
+
+| Piece | State |
+| --- | --- |
+| Uptime monitor | **Live.** Better Stack, `https://receiptless-theta.vercel.app/api/health`, every 3 minutes, alerting by e-mail. Test alert sent and **received** — not assumed |
+| Heartbeat | **Live.** "receiptless daily maintenance", expects a ping every 1 day with a 2-hour grace. `HEARTBEAT_URL` set in Vercel (Production only, Sensitive) and deployed |
+| Sentry | Live since session 10 |
+| `LOG_SINK_URL` | Not configured. Optional; the app is silent without it |
+
+**A correction worth keeping, because it changed the design.** The plan
+was to alert on a missing `"status":"ok"` keyword, on the belief that
+`/api/health` returned 200 while degraded. It does not — it returns
+**503** whenever the database is unreachable, required configuration is
+missing, or configuration is insecure. The free "URL becomes
+unavailable" condition therefore already covers every degraded case, and
+the keyword check (a paid feature) is unnecessary. The endpoint was
+written to fail closed in session 10; the alerting plan had simply
+forgotten it.
+
+`HEARTBEAT_URL` is **Production only** deliberately: crons run only in
+production, and a preview deployment pinging the same heartbeat would
+report the production job healthy when it had not run.
+
 **The uptime monitor is the important one and it is not optional.** A
 function that times out writes nothing — no log line, no Sentry event,
 because no code of ours runs. Only something outside the process can

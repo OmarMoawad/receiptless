@@ -10,7 +10,24 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-> **Next action: Phase 2 session 1 — upgrade Vercel to Pro, then wire
+> **Next action: Phase 2 session 3 — real search.** Postgres full-text
+> over merchants, item names and notes, replacing today's `ILIKE` in
+> `/api/search`, with ranking and a UI that shows *why* a receipt
+> matched. It is the first product work in a while and needs nothing
+> from anyone.
+>
+> **Session 1 (Vercel Pro + log drain) is deliberately deferred, not
+> forgotten.** Investigating it produced three findings that shrank it:
+> previews are already protected by Vercel Authentication on Hobby (not a
+> Pro feature); Hobby function duration is already 300s, the same default
+> as Pro; and the drain's day-to-day value is now largely covered for
+> free — an uptime monitor, a cron heartbeat and app-level logging, all
+> live as of 2026-08-19 (DEPLOYMENT.md §3d). What Pro still buys is the
+> platform log stream for post-mortem of a killed invocation. Payment is
+> also a real obstacle: Vercel takes bank-issued cards only, and rejects
+> the prepaid and virtual cards reachable from Egypt.
+>
+> Superseded: **Phase 2 session 1 — upgrade Vercel to Pro, then wire
 > the log drain. It needs Omar and nothing else in it can start.**
 > Session 2b is done (2026-08-16) and closed every review item that an
 > agent can close without an account, a purchase, or production
