@@ -143,6 +143,14 @@ model Receipt {
   items ReceiptItem[]
   inboundEmailDelivery InboundEmailDelivery?
 
+  /// Full-text search document: merchant name (weight A), item names (B),
+  /// notes (C). Maintained by database triggers — see the
+  /// 20260819100000_add_receipt_search_vector migration — because items are
+  /// inserted after their receipt, so no application-side write could keep
+  /// it correct without remembering to. Unsupported: Prisma has no tsvector
+  /// type, and it is only ever read through raw SQL in lib/search.ts.
+  searchVector Unsupported("tsvector")?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

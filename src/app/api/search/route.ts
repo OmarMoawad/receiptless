@@ -1,15 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { searchReceipts } from "@/lib/search";
 
 /**
- * Minimal vault search: substring match across merchant name and item
- * names. This is a placeholder for real full-text/semantic search
- * (ROADMAP.md, vault phase) — good enough to prove "find my AirPods
- * receipt" works before investing in a proper search index. Session 3
- * (RECEIPTLESS_STATE.md): scoped by `ownerId` — one user's search never
- * surfaces another user's receipts, and an unclaimed (ownerless) receipt
- * never appears here either.
+ * Vault search. Phase 2 session 3 replaced the substring match with
+ * Postgres full text — see lib/search.ts for what the old one got wrong
+ * (it was case-sensitive, unrankable, and unindexable).
+ *
+ * Session 3's tenant isolation is unchanged and enforced inside
+ * `searchReceipts`: one user's search never surfaces another's receipts,
+ * and an unclaimed receipt has no owner so it cannot appear either.
+ *
+ * The response keeps the receipt shape it always had, with `rank` and
+ * `matchedOn` alongside — so an existing caller reading the receipt
+ * fields keeps working.
  */
 export async function GET(request: NextRequest) {
   const user = await getCurrentUser(request);
@@ -18,19 +22,6 @@ export async function GET(request: NextRequest) {
   const q = request.nextUrl.searchParams.get("q")?.trim();
   if (!q) return NextResponse.json([]);
 
-  const receipts = await prisma.receipt.findMany({
-    where: {
-      ownerId: user.userId,
-      OR: [
-        { merchant: { name: { contains: q } } },
-        { notes: { contains: q } },
-        { items: { some: { name: { contains: q } } } },
-      ],
-    },
-    include: { merchant: true, items: true },
-    orderBy: { purchasedAt: "desc" },
-    take: 50,
-  });
-
-  return NextResponse.json(receipts);
+  const hits = await searchReceipts(user.userId, q);
+  return NextResponse.json(hits.map((hit) => ({ ...hit.receipt, rank: hit.rank, matchedOn: hit.matchedOn })));
 }

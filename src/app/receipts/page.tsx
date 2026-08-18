@@ -4,6 +4,7 @@ import Link from "next/link";
 import { GmailConnections } from "@/components/GmailConnections";
 import { getCurrentUserFromCookies } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { describeMatch, searchReceipts } from "@/lib/search";
 import { formatMinorUnits } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
@@ -65,23 +66,28 @@ export default async function ReceiptsPage({
     createdAt: connection.createdAt.toISOString(),
   }));
 
-  const receipts = await prisma.receipt.findMany({
-    where: {
-      ownerId: user.userId,
-      ...(q
-        ? {
-            OR: [
-              { merchant: { name: { contains: q } } },
-              { notes: { contains: q } },
-              { items: { some: { name: { contains: q } } } },
-            ],
-          }
-        : {}),
-    },
-    include: { merchant: true, items: true },
-    orderBy: { purchasedAt: "desc" },
-    take: 100,
-  });
+  /**
+   * Searching and listing are different queries, and this page used to
+   * blur them into one `findMany` with an optional OR block — which is how
+   * it ended up with its own copy of the search logic, duplicating
+   * /api/search. Session 3's tenant-isolation bug on this page came from
+   * exactly that kind of divergence, so there is now one implementation
+   * (lib/search.ts) and this page calls it.
+   */
+  const hits = q ? await searchReceipts(user.userId, q, 100) : [];
+  const receipts = q
+    ? hits.map((hit) => hit.receipt)
+    : await prisma.receipt.findMany({
+        where: { ownerId: user.userId },
+        include: { merchant: true, items: true },
+        orderBy: { purchasedAt: "desc" },
+        take: 100,
+      });
+  // Why each receipt matched, keyed by id — shown under the result so a
+  // search that returns something unexpected explains itself instead of
+  // looking broken.
+  const matchReasons = new Map(hits.map((hit) => [hit.receipt.id, describeMatch(hit.matchedOn)]));
+  const usedFallback = hits.length > 0 && hits.every((hit) => hit.matchedOn.viaFallback);
 
   return (
     <main className="flex flex-col gap-4 p-6 max-w-2xl mx-auto">
@@ -125,6 +131,17 @@ export default async function ReceiptsPage({
         </button>
       </form>
 
+      {/*
+        Said plainly rather than silently: these results come from a
+        substring scan because full text found nothing, so they are not
+        ranked by relevance and the order is by date.
+      */}
+      {usedFallback && (
+        <p className="text-xs text-neutral-500">
+          No exact word matches for &ldquo;{q}&rdquo; — showing receipts that merely contain it, newest first.
+        </p>
+      )}
+
       {receipts.length === 0 && (
         <p className="text-neutral-500 text-sm">
           {q ? `No receipts match "${q}".` : "No receipts yet. Add your first one."}
@@ -144,6 +161,15 @@ export default async function ReceiptsPage({
                 {r.source} · {VERIFICATION_LABEL[r.verification]}
                 {r.items.length > 0 && ` · ${r.items.length} item${r.items.length === 1 ? "" : "s"}`}
               </p>
+              {/*
+                ROADMAP.md asks for a search UI that shows *why* a receipt
+                matched. Without it, a result whose merchant and total look
+                unrelated to the query reads as a broken search rather than
+                a note or an item line doing its job.
+              */}
+              {matchReasons.get(r.id) && (
+                <p className="text-xs text-emerald-700 dark:text-emerald-500">{matchReasons.get(r.id)}</p>
+              )}
             </div>
             <p className="font-mono">{formatMinorUnits(r.totalMinor, r.currency)}</p>
           </li>

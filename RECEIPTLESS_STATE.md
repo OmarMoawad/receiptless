@@ -10,11 +10,19 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-> **Next action: Phase 2 session 3 — real search.** Postgres full-text
-> over merchants, item names and notes, replacing today's `ILIKE` in
-> `/api/search`, with ranking and a UI that shows *why* a receipt
-> matched. It is the first product work in a while and needs nothing
-> from anyone.
+> **Next action: Phase 2 session 4 — warranty and return windows,
+> surfaced.** The schema already carries `warrantyMonths` and
+> `returnWindowDays` on every item and nothing displays them, which makes
+> it the most direct answer to ROADMAP.md's own "I need to return this"
+> use case. Needs nothing from anyone.
+>
+> **Session 3 (real search) is done, 2026-08-19.** Postgres full text with
+> a trigger-maintained `tsvector`, weighted merchant > items > notes, GIN
+> indexed, ranked, with the UI showing *why* each receipt matched. It also
+> fixed a live bug: the previous search used Prisma's `contains` without
+> `mode: "insensitive"`, which compiles to `LIKE` and is **case-sensitive
+> in Postgres** — so searching `flat white` never found `Flat white`.
+> Semantic search remains explicitly out of scope.
 >
 > **Session 1 (Vercel Pro + log drain) is deliberately deferred, not
 > forgotten.** Investigating it produced three findings that shrank it:
