@@ -31,7 +31,16 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
 // tolerated after the amount — real scans routinely misread the last
 // couple of characters on a line, and requiring an exact end-of-line match
 // was silently discarding otherwise-good matches on real photos.
-const AMOUNT_AT_END = /([$€£]?)\s?(\d{1,3}(?:[,.]\d{3})*[.,]\d{2})[\s*]{0,3}[A-Za-z0-9%]{0,4}\s*$/;
+//
+// The leading `(?<![\d])` is load-bearing, and its absence was a real bug
+// found while building the plausibility check (review #8). Without it the
+// digit group could match a *suffix* of a longer run: an order number
+// printed as "Total: 88123456789.00" matched "789.00" and became a
+// confident, plausible, completely wrong £789.00 receipt. A wrong amount
+// in a vault is worse than a missing one — nothing about it looks wrong
+// later. Now the match must start at a digit boundary, so that line
+// parses as one implausible number and is refused outright.
+const AMOUNT_AT_END = /(?<![\d])([$€£]?)\s?(\d{1,3}(?:[,.]\d{3})*[.,]\d{2})[\s*]{0,3}[A-Za-z0-9%]{0,4}\s*$/;
 
 // Tesseract occasionally drops a decimal point entirely on a low-contrast
 // scan, misreading e.g. "$23.75" as "$23 75" (a plain space where the "."
@@ -41,7 +50,7 @@ const AMOUNT_AT_END = /([$€£]?)\s?(\d{1,3}(?:[,.]\d{3})*[.,]\d{2})[\s*]{0,3}[
 // digits, since a bare "<number> <number>" pair with no currency marker
 // is too ambiguous (quantities, phone numbers, dates all look like that)
 // to safely reinterpret as a garbled amount.
-const CURRENCY_SPACE_DECIMAL_AT_END = /[$€£]\s?(\d{1,3})\s+(\d{2})\s*$/;
+const CURRENCY_SPACE_DECIMAL_AT_END = /[$€£]\s?(?<![\d])(\d{1,3})\s+(\d{2})\s*$/;
 
 /** Tries the normal amount shape first, then the space-for-decimal-point repair above. */
 function matchAmountMinor(line: string): number | null {

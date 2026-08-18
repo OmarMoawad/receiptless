@@ -4,6 +4,7 @@ import {
   isDeployedEnvironment,
   isMerchantApiEnabled,
   missingProductionConfig,
+  ocrAvailability,
 } from "./deployment";
 import { InsecureEncryptionKeyError, resolveEncryptionKey } from "./oauth-token-crypto";
 
@@ -177,5 +178,53 @@ describe("Gmail OAuth is all-or-nothing in production (review finding 1)", () =>
 
   it("asks for nothing when OAuth is not configured at all", () => {
     expect(missingProductionConfig({ ...deployed, ...fullConfig })).toEqual([]);
+  });
+});
+
+/**
+ * Review findings #9/#10. Two failure modes are closed here without
+ * needing the licensing answer: offering a feature that is not deployed,
+ * and enabling a non-commercially-licensed model in a deployment by
+ * accident.
+ */
+describe("ocrAvailability", () => {
+  const deployedEnv = { VERCEL_ENV: "production" } as unknown as NodeJS.ProcessEnv;
+
+  it("is on locally with no configuration — docker-compose runs the service", () => {
+    expect(ocrAvailability(local).available).toBe(true);
+  });
+
+  it("is off in a deployment with no OCR service configured", () => {
+    const result = ocrAvailability(deployedEnv);
+    expect(result.available).toBe(false);
+    expect(result.reason).toMatch(/no OCR service is configured/);
+  });
+
+  it("stays off when a service is configured but the licence is not acknowledged", () => {
+    const result = ocrAvailability({ ...deployedEnv, OCR_SERVICE_URL: "https://ocr.example" });
+    expect(result.available).toBe(false);
+    expect(result.reason).toMatch(/non-commercial/);
+  });
+
+  it("fails closed on anything but the exact acknowledgement string", () => {
+    for (const value of ["1", "yes", "TRUE", " ", ""]) {
+      expect(
+        ocrAvailability({
+          ...deployedEnv,
+          OCR_SERVICE_URL: "https://ocr.example",
+          OCR_NONCOMMERCIAL_ACKNOWLEDGED: value,
+        }).available,
+      ).toBe(false);
+    }
+  });
+
+  it("is on in a deployment that configures a service and acknowledges the licence", () => {
+    expect(
+      ocrAvailability({
+        ...deployedEnv,
+        OCR_SERVICE_URL: "https://ocr.example",
+        OCR_NONCOMMERCIAL_ACKNOWLEDGED: "true",
+      }).available,
+    ).toBe(true);
   });
 });

@@ -53,5 +53,11 @@ ocr-service/__pycache__/
 ocr-service/*.pyc
 ocr-service/.venv/
 
+# playwright (browser-level e2e — see playwright.config.ts)
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
 # isolated feature worktrees
 .worktrees/

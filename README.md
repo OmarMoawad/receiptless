@@ -125,8 +125,8 @@ npm run test
 npm run build
 ```
 
-**Last verified:** 249 tests across 31 files, all passing, on
-2026-08-16 against local Postgres 16 on `localhost:5433`, run serially
+**Last verified:** 271 tests across 33 files, all passing, plus two
+browser-level Playwright journeys (`npm run e2e`), on 2026-08-16 against local Postgres 16 on `localhost:5433`, run serially
 (`npx vitest run --maxWorkers=1 --fileParallelism=false`) — the parallel
 run shares one database and produces contention failures that are not
 regressions. `npm run lint` and `npm run build` are green on the same

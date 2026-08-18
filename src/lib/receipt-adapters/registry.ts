@@ -11,13 +11,19 @@
  * to provide.
  */
 import type { InboundEmail } from "../inbound-email";
+import { inlineSummaryAdapter } from "./inline-summary";
 import { keyValueAdapter } from "./key-value";
 import { parseReceiptDate } from "./text";
 import { orderSummaryAdapter } from "./order-summary";
 import { posSlipAdapter } from "./pos-slip";
 import type { AdapterItem, ReceiptAdapter } from "./types";
 
-export const adapters: ReceiptAdapter[] = [orderSummaryAdapter, keyValueAdapter, posSlipAdapter];
+export const adapters: ReceiptAdapter[] = [
+  orderSummaryAdapter,
+  keyValueAdapter,
+  inlineSummaryAdapter,
+  posSlipAdapter,
+];
 
 export type ResolvedEmailReceipt = {
   adapterId: string;

@@ -39,6 +39,53 @@ export function isMerchantApiEnabled(env: NodeJS.ProcessEnv = process.env): bool
 }
 
 /**
+ * Whether photo OCR should be offered at all, and if not, why.
+ *
+ * External review findings #9 and #10, taken together: the Surya service
+ * is not deployed anywhere, so in production the "Upload photo" path
+ * offered automatic reading that could only ever fail — and separately,
+ * Surya's model weights are licensed CC-BY-NC-SA-4.0, which is
+ * **non-commercial**, so the feature cannot simply be switched on for a
+ * commercial deployment once the hosting exists.
+ *
+ * The licensing question is Omar's to resolve (replace the weights,
+ * license them, or exclude the feature from commercial use) and is not
+ * improved by being deferred — see ROADMAP.md's post-production revisit
+ * list. What code can do is stop the two failure modes that do not need
+ * that answer: never offer a feature that is not there, and never let a
+ * non-commercially-licensed model be enabled in a deployment by accident.
+ *
+ * So a deployed environment must both point at a service **and** state
+ * that the licence has been considered. Locally it stays on with no
+ * configuration, because docker-compose.yml runs the service and local
+ * development is not distribution.
+ */
+export type OcrAvailability = { available: boolean; reason: string | null };
+
+export function ocrAvailability(env: NodeJS.ProcessEnv = process.env): OcrAvailability {
+  if (!isDeployedEnvironment(env)) return { available: true, reason: null };
+
+  if (!env.OCR_SERVICE_URL?.trim()) {
+    return {
+      available: false,
+      reason: "Automatic photo reading is not available in this deployment — no OCR service is configured.",
+    };
+  }
+
+  // Fails closed, same rule as MERCHANT_API_ENABLED: only the exact
+  // string "true" counts, so a typo or a stray "1" leaves it off.
+  if (env.OCR_NONCOMMERCIAL_ACKNOWLEDGED?.trim() !== "true") {
+    return {
+      available: false,
+      reason:
+        "Automatic photo reading is turned off in this deployment: the OCR model's weights are licensed for non-commercial use only, and that has not been acknowledged for this environment.",
+    };
+  }
+
+  return { available: true, reason: null };
+}
+
+/**
  * Configuration that must be present before a deployment is allowed to
  * serve real traffic. Returned as a list rather than thrown, so a health
  * endpoint can report everything missing at once instead of one item per

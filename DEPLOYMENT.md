@@ -66,7 +66,9 @@ database.
 | `GOOGLE_OAUTH_CLIENT_SECRET` | if Gmail scanning | |
 | `GOOGLE_OAUTH_REDIRECT_URI` | if Gmail scanning | Must match Google exactly |
 | `EMAIL_OAUTH_ENCRYPTION_KEY` | **if Gmail scanning** | Generate with `openssl rand -base64 32`. The built-in fallback is committed to this repo and is refused in any deployed environment. **Part of the all-or-nothing Gmail group — see the warning below** |
-| `OCR_SERVICE_URL` | if OCR | The self-hosted Surya service |
+| `OCR_SERVICE_URL` | if OCR | The self-hosted Surya service. Unset means automatic photo reading is **off and says so**, rather than failing at upload time |
+| `OCR_NONCOMMERCIAL_ACKNOWLEDGED` | if OCR | Must be exactly `true`. See section 3c before setting it — this is a licensing acknowledgement, not a feature flag |
+| `CRON_SECRET` | **yes** | Generate with `openssl rand -base64 32`. Vercel Cron sends it as `Authorization: Bearer …`; the maintenance job refuses to run in a deployed environment without it, so an unset value means housekeeping silently never happens |
 
 `missingProductionConfig` (`src/lib/deployment.ts`) enforces the required
 rows and the all-or-nothing rule for inbound email — a half-configured
@@ -119,6 +121,54 @@ per hour, from whichever request notices. That is deliberate (serverless
 has no long-lived process for a timer) and it is weaker than a scheduled
 job: an instance that never gets a request never prunes. A Vercel cron is
 the real fix and does not exist yet.
+
+## 3b. The daily maintenance job
+
+`vercel.json` schedules `GET /api/cron/maintenance` at 04:00 UTC. It
+deletes `Session` rows that expired or were revoked more than a week ago
+(review finding #14 — every login wrote a row and nothing ever deleted
+one) and rate-limit counters whose window ended more than a day ago.
+
+The week is deliberate: a session past its expiry authenticates nobody,
+but it is exactly the row someone asks about after "did somebody get into
+my account?", and deleting on expiry throws that away.
+
+**`CRON_SECRET` must be set**, or the endpoint returns 404 in a deployed
+environment and nothing is ever cleaned up. It returns 404 rather than
+401 so an unauthenticated caller learns nothing about whether the
+endpoint exists.
+
+Check it ran: the response body reports `sessionsDeleted` and
+`rateLimitCountersDeleted`, and Vercel's cron log shows the invocation.
+Nothing alerts if it stops running — that needs the log drain, which
+needs Pro (section 1 of Phase 2's cadence).
+
+**Still Omar's decision, not closed by this job:** whether to cap
+concurrent sessions per user, and whether to offer "log out other
+devices". Deleting rows nobody can authenticate with needs no product
+decision; those two do.
+
+## 3c. Automatic photo reading is off unless two things are true
+
+Review findings #9 and #10. The Surya OCR service is not deployed
+anywhere, and its model weights (`vikp/surya_det3`, `vikp/surya_rec2`)
+are licensed **CC-BY-NC-SA-4.0 — non-commercial**.
+
+The licensing question is Omar's and does not improve by being deferred:
+replace the weights, license them, or exclude the feature from commercial
+use (ROADMAP.md's post-production revisit list). Until then the app does
+the two things that do not need that answer — it never offers a feature
+that is not there, and it never lets the model be enabled by accident:
+
+- `OCR_SERVICE_URL` unset → the capture screen says automatic reading is
+  off, the photo still attaches, and the details are typed in. No upload
+  is sent to a route that has already decided to refuse it.
+- `OCR_SERVICE_URL` set but `OCR_NONCOMMERCIAL_ACKNOWLEDGED` not exactly
+  `true` → still off, and the reason names the licence.
+
+Setting `OCR_NONCOMMERCIAL_ACKNOWLEDGED=true` is a statement that this
+particular deployment is not a commercial use, or that the weights have
+been replaced or licensed. It is not a way to make the warning go away.
 
 ## 4. Migrations — a release step, not a build step
 
@@ -176,16 +226,77 @@ is `false` and both arrays are empty.
 
 ## 6. Backups — do not skip
 
-> **Current state (2026-08-15):** Neon history retention on this project
-> is **6 hours**, confirmed in the console. Point-in-time restore is
-> possible only inside that window; there is no daily snapshot behind it
-> on this tier. **A restore has never been performed** — the window is
-> confirmed, the ability to use it is not. See RECEIPTLESS_STATE.md's
-> "Backup posture" for the standing decision and when to revisit.
+External review finding #1: six-hour point-in-time recovery, no
+independent backup, and no restore ever performed is too thin for data
+anyone would miss.
 
-Hosted Postgres providers vary: some retain point-in-time recovery only on
-paid tiers. Confirm the retention window before real receipts exist, not
-after. This is part of the hard gate above, not an optimization.
+### What we accept losing, and how long we accept being down
+
+Stated as numbers, because "we have backups" is not a recovery objective
+and cannot be checked. These are **targets chosen deliberately**, not
+measurements of a system under load:
+
+| | Target | What actually delivers it |
+| --- | --- | --- |
+| **RPO** — data we accept losing, ordinary case (bad migration, deleted rows, a mistake) | **≈ 0**, anywhere inside the last 6 hours | Neon point-in-time recovery |
+| **RPO** — catastrophic case (Neon account lost, project deleted, provider incident) | **24 hours** | A daily dump written somewhere that is not Neon |
+| **RTO** — time to be serving again | **4 hours** | Restore, then re-point `DATABASE_URL` and redeploy |
+
+The RTO is dominated by **noticing**, not by restoring. The restore
+itself took seconds against a database of this size; there is no
+alerting, so the clock starts when a human looks. Until the log drain
+exists (Phase 2 session 1, needs Pro), that is the honest bound.
+
+The catastrophic-case RPO is 24 hours **only if the daily dump is
+actually being taken**. Right now it is a script that a person runs —
+see below.
+
+### Taking an independent backup
+
+```
+DATABASE_URL=<production url> node scripts/backup-database.mjs --out ./backups
+```
+
+Writes a compressed custom-format dump and prints its size and SHA-256.
+It deliberately does not upload anywhere: where backups live is a
+decision about someone's financial history, not something a script should
+guess. On a machine with no Postgres client installed, add
+`--docker <container> --url <in-container url>`.
+
+Point-in-time recovery inside a provider is not a backup in the sense
+that matters — it does not survive the account, a billing lapse, a
+mistaken project deletion, or a provider-side incident. A dump written
+elsewhere does.
+
+### Proving it restores — **DONE, 2026-08-16**
+
+```
+node scripts/verify-backup-restore.mjs <dump> --admin-url <url> --source-url <url>
+```
+
+Restores the dump into a scratch database, compares row counts for
+`User`, `Session`, `Receipt`, `ReceiptItem`, `Merchant`,
+`InboundEmailDelivery` and `EmailConnection` against the source, and
+drops the scratch database afterwards.
+
+**First rehearsal, 2026-08-16, against the local development database:**
+0.92 MiB dump, all 7 tables restored with matching row counts (3345
+users, 2162 receipts, 388 deliveries). PASS.
+
+**Scoped honestly:** that proves the *procedure* and the *scripts* work.
+It does not prove a restore of the production Neon database, which nobody
+has attempted, and which is the one that matters. Doing it needs
+production credentials — **Omar**. The procedure is now a command to run
+rather than a plan to write.
+
+### Still open, and it needs a decision rather than more code
+
+- **Nothing schedules the dump.** `vercel.json`'s cron runs inside the
+  deployment and cannot write a file anywhere durable; a real daily
+  backup needs somewhere to run it (a laptop cron, a GitHub Action with
+  a secret, or Neon's own paid backup tier). **Omar's call.**
+- **Extending Neon retention past 6 hours is a paid tier.** Same
+  purchase decision as Vercel Pro, and worth making at the same time.
 
 ## 7. Rollback — rehearse it before you need it
 
