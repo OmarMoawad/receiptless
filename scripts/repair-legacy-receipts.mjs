@@ -77,6 +77,28 @@ const client = new Client({ connectionString: requireDatabaseUrl() });
 await client.connect();
 
 try {
+  /**
+   * This script writes `status` and `failureReason` on
+   * InboundEmailDelivery, which the session-2b migration adds. Pointed at
+   * a database still on the previous release it would abort mid
+   * transaction with a bare "column does not exist" — which is exactly
+   * what happened on 2026-08-18 when the equivalent SQL was run by hand
+   * against production before the migration had landed.
+   *
+   * Checked up front so the answer is a sentence rather than an aborted
+   * transaction the operator has to reason about and roll back.
+   */
+  const { rows: schema } = await client.query(
+    `SELECT count(*)::int AS present FROM information_schema.columns
+     WHERE table_name = 'InboundEmailDelivery' AND column_name IN ('status', 'failureReason')`,
+  );
+  if (schema[0].present < 2) {
+    console.error("This database has not run the session-2b migration yet.");
+    console.error("InboundEmailDelivery is missing `status` and/or `failureReason`, which this script writes.");
+    console.error("Deploy the migration first (npm run db:migrate), then re-run. Nothing was changed.");
+    process.exit(4);
+  }
+
   const { rows } = await client.query(SELECT_SUSPECT_RECEIPTS, [DATE_LIKE_MERCHANT, owner]);
 
   if (rows.length === 0) {
