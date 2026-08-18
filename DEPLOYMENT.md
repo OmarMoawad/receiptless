@@ -236,6 +236,42 @@ carries the bucket and the count, never the subject; message bodies,
 tokens and payloads are redacted by an enforced list in `log-sink.ts`,
 with tests.
 
+## 3e. The schema check on /api/health — and the outage that caused it
+
+**2026-08-19: production was broken for about half an hour and nothing
+noticed.** Three merged PRs deployed code needing three new tables and
+columns. Vercel deploys code, not schema — deliberately, see section 4 —
+so the migrations had not run. Every login returned 500, because login
+goes through the rate-limit table.
+
+Sentry recorded the exceptions but nobody was watching it. `/api/health`
+returned 200 throughout, because it only ran `SELECT 1`. The uptime
+monitor was green for the same reason. **The failure was found by trying
+to log in.**
+
+`/api/health` now compares the migration directories in the build against
+`_prisma_migrations` in the database, and reports `schema` plus
+`pendingMigrations`. A database that is behind the code **fails readiness
+(503)**, which the uptime monitor already alerts on — so this class of
+outage now surfaces in about three minutes, with the missing migration
+named.
+
+Deliberately, an unreadable migrations directory reports `unknown` and
+does **not** fail readiness. A check that cries wolf gets muted, and a
+muted check is worse than no check.
+
+The fix when it fires is one command, from a checkout of the deployed
+commit:
+
+```
+DATABASE_URL=<production url> npx prisma migrate deploy
+```
+
+> **Run it from the right checkout.** During the incident it was first run
+> from a worktree parked on an old branch, which saw 8 migrations instead
+> of 11 and reported "No pending migrations to apply" — reassuring, and
+> wrong. Check `git branch --show-current` first.
+
 ## 4. Migrations — a release step, not a build step
 
 The build command is `prisma generate && next build`. It deliberately does
