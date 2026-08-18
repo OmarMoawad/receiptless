@@ -70,3 +70,14 @@ jobs:
       - run: npm run build
 
       - run: npm run typecheck
+
+      # Browser-level end-to-end, external review finding #12. `npm run
+      # smoke` walks the same journey over fetch and cannot see a
+      # component that throws at render, a hydration mismatch, or a
+      # control that does nothing — all of which return 200 and ship a
+      # page no human can use. That is not hypothetical here: session 10
+      # deployed a working login API with no sign-in UI at all, and 219
+      # API tests were happy. Runs after build because it drives the
+      # production server, not the dev one.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e

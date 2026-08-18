@@ -10,7 +10,40 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-> **Next action: Phase 2 session 1 — upgrade Vercel to Pro, then wire the
+> **Next action: Phase 2 session 1 — upgrade Vercel to Pro, then wire
+> the log drain. It needs Omar and nothing else in it can start.**
+> Session 2b is done (2026-08-16) and closed every review item that an
+> agent can close without an account, a purchase, or production
+> credentials: independent backups with a rehearsed restore (#1),
+> retryable parsing and the review list (#6/#7), plausibility checks and
+> the amount-parsing bug they uncovered (#8), OCR labelled unavailable
+> (#9/#10 engineering half), a real-browser end-to-end journey (#12), and
+> scheduled session cleanup (#14).
+>
+> **The production data audit is DONE, 2026-08-18** — run by Omar in
+> Neon's SQL editor against the production branch, with the results
+> below. #6's existing rows are closed. See "Production data audit" for
+> the evidence and for the two tooling bugs it exposed.
+>
+> **What is left of the review is now exactly the set that needs Omar**,
+> and it is short: the Vercel Pro purchase and the log drain (#3), a Neon
+> retention decision and a production restore (#1's remaining half), the
+> Surya weights licensing question (#9/#10), OAuth publication (#13), and
+> the session-cap product decision (#14). After that, Phase 2 sessions
+> 3–7 are ordinary feature work.
+>
+> Superseded: **Phase 2 session 2b — the rest of the external review
+> list.** Session 2a is done (2026-08-16): **rate limiting and a
+> consistent trusted-origin policy**, review findings #4 and #5, the two
+> the sequencing note below calls the ones that gate real users.
+>
+> Still true, and still first in the cadence: **session 1 — upgrade
+> Vercel to Pro, then wire the log drain — needs Omar** and nothing else
+> in it can start. Session 2a was done ahead of it because it needed no
+> purchase; that ordering is a fact about who can do what, not a demotion
+> of the drain.
+>
+> Superseded: **Phase 2 session 1 — upgrade Vercel to Pro, then wire the
 > log drain.** Chosen as the milestone's first item on 2026-08-15 because
 > it is the only unmet Session 10 exit criterion and it needs a purchase
 > rather than engineering time. **Needs Omar**; nothing else in that
@@ -1785,7 +1818,11 @@ because it closes the only Session 10 exit criterion that went unmet.
    hold anything real.
 
 2. **Act on the external review (2026-08-15).** **Decided by Omar as the
-   item immediately after the Pro upgrade.**
+   item immediately after the Pro upgrade.** Split into **2a (done,
+   2026-08-16)** and **2b (open)** — the same way session 10 became Part
+   A/Part B and IDent's session 22 became 22b, because one entry covering
+   eight findings cannot be either finished or honestly reported as
+   partly finished.
 
    An external review of `main` at `5d31d658` (CI passing, dependency
    audit clean) raised 14 findings. Its verdict: *"reasonable as a
@@ -1814,11 +1851,115 @@ because it closes the only Session 10 exit criterion that went unmet.
       dumps; **perform and document a real restore**; define acceptable
       RPO and RTO explicitly rather than inheriting whatever the tier
       gives.
-   2. **Authentication throttling and CSRF** (#4, #5). No rate limiting on
-      login or registration — password guessing and argon2 resource
-      exhaustion are both open. Apply a consistent trusted-origin or
-      CSRF-token policy across login, registration, OAuth mutations,
-      logout, receipt creation and upload, scan, and disconnect.
+   2. ~~**Authentication throttling and CSRF** (#4, #5).~~ **Done
+      2026-08-16 — this is session 2a.** Rate limiting is a fixed-window
+      counter in Postgres (`src/lib/rate-limit/`), keyed by
+      `(bucket, subject)` and incremented by a single atomic
+      `INSERT ... ON CONFLICT DO UPDATE ... RETURNING`. In Postgres and
+      not in memory because this runs on Vercel, where consecutive
+      requests land on different instances and a per-process counter
+      would limit nothing. One statement and not read-then-write because
+      that race is worst exactly when a flood is happening — a test fires
+      20 concurrent requests at a limit of 5 and asserts that precisely 5
+      pass.
+
+      **The design is shared with IDent, which the review asked for.**
+      Same bucket names, same limits, same 429 + `Retry-After`, same
+      atomic statement; IDent's copy is `apps/api/src/rate-limit/`. The
+      two repos now have one answer to this, not two.
+
+      Login is limited **per-username as well as per-IP**, which is what
+      actually stops credential stuffing — per-IP alone does nothing
+      against a spread-out attempt on one account. **The cost, recorded
+      rather than buried:** someone can spend failures to lock a known
+      username out of login for the window. It is per-window rather than
+      cumulative, and unlike IDent this app has no passkey path as a
+      second way in — worth knowing before that number is lowered.
+
+      The origin policy is now **one middleware** (`src/middleware.ts`)
+      over every mutating method, replacing three call sites that all
+      came from session 3's claim flow. GET is deliberately not checked:
+      the Gmail OAuth callback is a top-level redirect that legitimately
+      arrives with a cross-site `Referer`, and checking it would break
+      connecting an account every time. Server-to-server callers
+      (Postmark, a POS terminal) send neither header and are unaffected;
+      their control is their own credential, which is the right one for a
+      non-browser caller.
+
+      **What is honestly weaker than it looks, stated rather than
+      discovered later:**
+
+      - **Enforcement is off inside the test suite** unless a test asks
+        for it (`RATE_LIMIT_ENFORCE=1`). Every test file shares one
+        Postgres and no test request carries a client IP, so a
+        suite-wide limit would make unrelated tests fail each other in
+        exactly the shape this repo has twice misread as a regression.
+        The consequence is real: the ordinary route tests prove nothing
+        about throttling, and only `rate-limit.test.ts` exercises the
+        enforced path.
+      - **The limits cannot live in middleware**, because Next runs
+        middleware on the edge runtime and Prisma cannot follow, so each
+        mutating handler calls `enforceRateLimit` itself. A coverage test
+        asserts every mutating API route does — it is the stand-in for
+        IDent's single Fastify hook, and it was checked by removing one
+        call and watching it fail.
+      - **`x-forwarded-for` is trusted**, which is correct on Vercel
+        (the platform sets it) and would be wrong behind a proxy that
+        does not. Recorded in DEPLOYMENT.md.
+      - **Counter rows are pruned opportunistically**, at most once per
+        instance per hour, because Vercel has no long-lived process to
+        hang a timer on. A Vercel cron would be better and does not
+        exist yet — see #8 below, which is the same class of problem.
+
+      **Session 2b — the rest of the review list. DONE 2026-08-16**,
+      for every part that does not need an account, a purchase, or
+      production credentials. What each item actually closed, and what it
+      pointedly did not:
+
+      - **#1 backups.** `scripts/backup-database.mjs` writes an
+        independent dump with a checksum;
+        `scripts/verify-backup-restore.mjs` restores it into a scratch
+        database and compares per-table row counts. **Rehearsed
+        2026-08-16 — seven tables, matching counts, PASS.** RPO and RTO
+        are now written down as targets (DEPLOYMENT.md §6) instead of
+        implied. **Not closed:** a restore of the *production* Neon
+        database, extending retention past six hours, and scheduling the
+        dump — a Vercel cron cannot write a durable file anywhere.
+      - **#6/#7 retryable parsing.** Unreadable mail is retained on its
+        delivery row and reprocessable rather than marked seen and lost;
+        `GET /api/email/deliveries` shows the owner what was skipped and
+        why. **Not closed:** the rows already in production —
+        `scripts/repair-legacy-receipts.mjs` does it, dry-run by default,
+        and needs Omar to point it at production.
+      - **#8 plausibility — and a real bug it found.** **Production data
+        may be affected and `repair-legacy-receipts.mjs` cannot find it**
+        — a wrong-but-plausible total looks exactly like a right one.
+        `scripts/audit-suspect-totals.mjs` (read-only, no `--apply`)
+        re-reads each retained message and flags receipts whose stored
+        total is exactly what the bug would have produced. **Needs Omar
+        to run it against production.** Receipts whose message was not
+        retained cannot be checked this way at all; those need the source
+        mail read by hand. Adding the range
+        check surfaced something worse than the check was for:
+        `AMOUNT_AT_END` matched a *suffix* of a longer digit run, so
+        "Total: 88123456789.00" became a confident, plausible, completely
+        wrong £789.00 receipt. A wrong amount in a vault is worse than a
+        missing one, because nothing about it looks wrong later. **Not
+        closed:** confidence scoring and real anonymised fixtures, both
+        of which need Omar's actual receipt mail.
+      - **#9/#10 OCR.** Automatic photo reading is now off unless a
+        deployment both configures a service and acknowledges that the
+        model weights are non-commercial — and the capture screen says
+        so instead of failing after the upload. **Not closed:** the
+        licensing question itself, which is Omar's and does not improve
+        by being deferred.
+      - **#12 browser-level test.** Two Playwright journeys against a
+        production build, asserting no uncaught page error and no console
+        error anywhere. Checked by breaking it on purpose. CI runs it.
+      - **#14 session growth.** A daily maintenance cron deletes sessions
+        dead for more than a week and stale rate-limit counters. **Not
+        closed:** whether to cap concurrent sessions or offer "log out
+        other devices" — product decisions, still Omar's.
    3. **Existing-data repair, and retryable parsing** (#6, #7, #8). The
       parser no longer imports totals it could not read, but the `$0.00`
       and date-as-merchant rows from the first scan **are still in
@@ -1874,6 +2015,72 @@ because it closes the only Session 10 exit criterion that went unmet.
    time; never convert on read with today's rate. **Needs Omar**: an FX
    rate source — most free tiers forbid commercial use, the same licensing
    trap already logged below for the Surya OCR weights.
+
+## Production data audit — DONE, 2026-08-18
+
+Run against the production branch in Neon's SQL editor. Recorded here
+with the numbers rather than as "checked, fine", because the point of
+the exercise was that nobody had ever looked.
+
+**Coverage was total, which is what makes the negative result mean
+something.** All **25** receipts in production came from email, and all
+**25** had retained their original message (`Receipt.rawPayload`), so
+every one could be re-read.
+
+**The amount-parsing bug (#8): zero matches.** No receipt's stored total
+equals what the old suffix-matching regex would have produced from a long
+number on its line. Full coverage plus zero hits is a real clean bill of
+health, not an absence of evidence.
+
+**Zero-total rows: four, and they were not the same thing.**
+
+| Merchant | Amount in the message? | Outcome |
+| --- | --- | --- |
+| Talabat (15 Aug) | no | deleted |
+| Talabat (3 Aug) | no | deleted |
+| Jumia Order Confirmation | no | deleted |
+| **Anthropic, PBC (5 Aug)** | **yes — $22.80** | **corrected, not deleted** |
+
+Three were order confirmations containing no money-shaped number
+anywhere. The fourth was a **real invoice**: `Pro Qty 1 $20.00`,
+`VAT - Egypt (14%) $2.80`, `Total $22.80`, `Amount paid $22.80` — stored
+as $0.00 because the entire receipt arrived on one unwrapped line and
+every adapter anchors its amount at end-of-line. Corrected to 2280 by a
+single UPDATE; the three others deleted. **Production now holds 22
+receipts, none with a zero total.**
+
+That message is also why `receipt-adapters/inline-summary.ts` exists,
+and why `INLINE_INVOICE_TEXT` is the first fixture in this repo derived
+from mail a real merchant actually sent (review item #8's "real
+anonymised fixtures"). The shape is preserved exactly; names, numbers
+and URLs are replaced.
+
+**Two tooling bugs this exposed, both fixed:**
+
+1. **`repair-legacy-receipts.mjs` would have deleted the Anthropic
+   receipt.** Its original form deleted every zero-total row. Destroying
+   a record of a real payment to tidy up a parser's mistake is strictly
+   worse than the mistake. It now classifies rows and refuses to delete
+   any whose message still contains an amount, whatever flags are passed.
+2. **SQL written against an unmerged migration aborted in production.**
+   The delete was first attempted with `status` and `failureReason` on
+   `InboundEmailDelivery` — columns this branch's migration adds and
+   production did not have. Postgres aborted the transaction and it was
+   correctly rolled back. The script now checks `information_schema`
+   first and refuses with a sentence.
+
+**Still open from this session's own work:** the `receipts_audit`
+read-only role in Neon was never made usable (three separate credential
+mistakes: a base64 password containing URL-structural characters, a
+clipboard that drifted between two commands, and a trailing newline from
+`openssl rand > file`). It is not on the critical path — every query
+above ran in the SQL editor — but **its password was exposed in a
+terminal and should be rotated or the role dropped.**
+
+**What no script can check, and nobody has:** whether the 22 remaining
+totals match the source mail. The parsing-bug audit rules out one
+specific failure; it does not confirm every amount is right. That needs
+eyes on the vault next to Gmail, and has not been done.
 
 ## Known open decisions
 

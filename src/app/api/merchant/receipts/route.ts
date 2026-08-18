@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { isMerchantApiEnabled } from "@/lib/deployment";
 import { merchantReceiptSchema } from "@/lib/validation";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 /**
  * Simulates the merchant/terminal side of the claim-token protocol
@@ -15,6 +16,9 @@ import { merchantReceiptSchema } from "@/lib/validation";
  * comment into an actual gate (see the check below).
  */
 export async function POST(request: NextRequest) {
+  const limited = await enforceRateLimit(request, ["merchant-api"]);
+  if (limited) return limited;
+
   // Unauthenticated and unrate-limited: it creates receipts and claim
   // tokens for anyone who can reach it. Off by default in any deployed
   // environment; must be switched on explicitly. 404 rather than 403 so a

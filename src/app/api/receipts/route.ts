@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { createReceiptSchema } from "@/lib/validation";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 /**
  * Session 3 (RECEIPTLESS_STATE.md): every receipt-facing route requires a
@@ -37,6 +38,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const limited = await enforceRateLimit(request, ["receipt-write"]);
+  if (limited) return limited;
+
   const user = await getCurrentUser(request);
   if (!user) return NextResponse.json({ error: "Sign in required" }, { status: 401 });
 

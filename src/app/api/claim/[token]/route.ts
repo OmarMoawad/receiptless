@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { previewClaim, resolveClaim } from "@/lib/claim";
 import { isSameOrigin } from "@/lib/origin-check";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 /**
  * Read-only preview of a claim-token receipt — see src/lib/claim.ts's
@@ -48,6 +49,11 @@ export async function POST(
   if (!isSameOrigin(request)) {
     return NextResponse.json({ error: "Cross-origin request rejected" }, { status: 403 });
   }
+
+  // Claim attach reassigns ownership from a URL, so an unthrottled
+  // endpoint is a token-guessing oracle as well as a write path.
+  const limited = await enforceRateLimit(request, ["claim"]);
+  if (limited) return limited;
 
   const { token } = await params;
   const user = await getCurrentUser(request);

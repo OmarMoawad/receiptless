@@ -125,11 +125,14 @@ npm run test
 npm run build
 ```
 
-**Last verified:** 201 tests across 27 files, all passing, at base
-`6e179d2` on 2026-08-14 against local Postgres 16 on `localhost:5433`.
-CI run
+**Last verified:** 271 tests across 33 files, all passing, plus two
+browser-level Playwright journeys (`npm run e2e`), on 2026-08-16 against local Postgres 16 on `localhost:5433`, run serially
+(`npx vitest run --maxWorkers=1 --fileParallelism=false`) — the parallel
+run shares one database and produces contention failures that are not
+regressions. `npm run lint` and `npm run build` are green on the same
+commit. Earlier: 201 tests at `6e179d2`, and CI run
 [31776002762](https://github.com/OmarMoawad/receiptless/actions/runs/31776002762)
-succeeded on `main` at `6e179d22`, checked 2026-08-14.
+on `main` at `6e179d22`, checked 2026-08-14.
 
 That figure is scoped deliberately: it covers this repo's own logic
 against a local database and synthetic fixtures. It does **not** cover

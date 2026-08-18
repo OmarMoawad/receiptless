@@ -74,3 +74,23 @@ TOTAL                    $8.42
 Thank you for shopping with us
 2026-08-01
 `;
+
+/**
+ * Format D: an unwrapped invoice email — the whole receipt on one line.
+ *
+ * **This one is not invented.** It is the structure of a real invoice
+ * from Omar's own mailbox, which the first production Gmail scan imported
+ * as a $0.00 receipt on 2026-08-05 and which session 2b's production
+ * audit found still sitting in the vault. The merchant name, receipt and
+ * invoice numbers, URLs and payment details are replaced; the *shape* —
+ * label order, the trailing support URL, the several amounts in a row —
+ * is preserved exactly, because the shape is what broke the parser.
+ *
+ * Every other fixture in this file is synthetic and marked as such. This
+ * is the first one derived from mail a real merchant actually sent, which
+ * is what RECEIPTLESS_STATE.md's review item #8 asked for.
+ */
+export const INLINE_INVOICE_TEXT = [
+  "Receipt from Example Cloud, PBC $22.80 Paid August 5, 2026 (invoice illustration [https://example.test/i.png]) Download invoice (https://example.test/invoice/pdf) Download receipt (https://example.test/receipt/pdf) Receipt number 0000-0000-0000 Invoice number XXXX0000-0000 Payment method - 0000",
+  "Receipt #0000-0000-0000 Aug 5\u2013Sep 5, 2026 Pro Plan Qty 1 $20.00 Subtotal $20.00 Total excluding tax $20.00 VAT - Egypt (14%) $2.80 Total $22.80 Amount paid $22.80 Questions? Visit our support site (https://example.test/support).",
+].join("\n");

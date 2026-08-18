@@ -7,6 +7,7 @@ import {
   receiptImageKey,
   sniffImageContentType,
 } from "@/lib/storage";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 /**
  * Uploads (or replaces) a receipt's photo — Session 4 (RECEIPTLESS_STATE.md).
@@ -21,6 +22,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const limited = await enforceRateLimit(request, ["receipt-write"]);
+  if (limited) return limited;
+
   const user = await getCurrentUser(request);
   if (!user) return NextResponse.json({ error: "Sign in required" }, { status: 401 });
 
