@@ -260,8 +260,26 @@ DATABASE_URL=<production url> node scripts/backup-database.mjs --out ./backups
 Writes a compressed custom-format dump and prints its size and SHA-256.
 It deliberately does not upload anywhere: where backups live is a
 decision about someone's financial history, not something a script should
-guess. On a machine with no Postgres client installed, add
-`--docker <container> --url <in-container url>`.
+guess.
+
+> **`pg_dump` must be at least as new as the server.** It refuses to dump
+> a newer one outright. **Neon production runs Postgres 18**; this repo's
+> local docker-compose database is 16, and there is no `pg_dump` on the
+> host at all — so the obvious `--docker receiptless-db-1` fails against
+> production with "server version mismatch". Discovering that during an
+> incident would be a bad evening. Use a matching one-off container:
+>
+> ```
+> DATABASE_URL=<production url> node scripts/backup-database.mjs >   --docker-image postgres:18 --out ./backups
+> ```
+>
+> A newer `pg_dump` reading an older server is fine, so `postgres:18`
+> backs up both production and local. Bump the pin when Neon's major
+> version moves — check with `SELECT current_setting('server_version')`.
+
+The password is passed to `pg_dump` through the environment rather than
+inside the connection-string argument, so a production credential never
+appears in the process list.
 
 Point-in-time recovery inside a provider is not a backup in the sense
 that matters — it does not survive the account, a billing lapse, a

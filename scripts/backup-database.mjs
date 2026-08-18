@@ -40,6 +40,7 @@ import { resolve } from "node:path";
 const args = process.argv.slice(2);
 const outDir = resolve(valueOf("--out") ?? "./backups");
 const container = valueOf("--docker");
+const image = valueOf("--docker-image");
 const url = valueOf("--url") ?? process.env.DATABASE_URL;
 
 function valueOf(flag) {
@@ -58,15 +59,57 @@ const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const outFile = resolve(outDir, `receiptless-${stamp}.dump`);
 
 /**
+ * **pg_dump must be at least the server's major version.** It refuses to
+ * dump a newer server outright — "aborting because of server version
+ * mismatch" — and this is not a hypothetical: production runs Neon on
+ * **Postgres 18**, while the local docker-compose database (and therefore
+ * the pg_dump inside it) is **16**. Backing up production by exec'ing
+ * into the local container fails on the first try, which is a poor thing
+ * to discover during an incident.
+ *
+ * Hence `--docker-image`: run pg_dump from a one-off container of the
+ * right version, with no Postgres installed on the host at all.
+ *
+ *   node scripts/backup-database.mjs --docker-image postgres:18
+ *
+ * A newer pg_dump reading an older server is fine, so one image can back
+ * up both. Pin it to the production major version and it stays correct.
+ */
+function splitPassword(connectionString) {
+  const parsed = new URL(connectionString);
+  const password = parsed.password;
+  // The password is removed from the URL and passed through the
+  // environment instead, so a production credential never appears in the
+  // process list where `ps` — or anyone reading over a shoulder — can see
+  // it. `docker run -e NAME` (no value) forwards it from our own env
+  // rather than putting it in argv.
+  parsed.password = "";
+  return { password, sanitized: parsed.toString() };
+}
+
+const { password, sanitized } = splitPassword(url);
+
+/**
  * Custom format (-Fc) rather than plain SQL: it is compressed, and
  * pg_restore can read it selectively — which matters when the thing you
  * need back is one table, not the whole database.
  */
-const pgDumpArgs = ["--format=custom", "--no-owner", "--no-privileges", url];
-const command = container ? "docker" : "pg_dump";
-const commandArgs = container ? ["exec", "-i", container, "pg_dump", ...pgDumpArgs] : pgDumpArgs;
+const pgDumpArgs = ["--format=custom", "--no-owner", "--no-privileges", sanitized];
 
-const child = spawn(command, commandArgs, { stdio: ["ignore", "pipe", "inherit"] });
+let command = "pg_dump";
+let commandArgs = pgDumpArgs;
+if (image) {
+  command = "docker";
+  commandArgs = ["run", "--rm", "-i", "-e", "PGPASSWORD", image, "pg_dump", ...pgDumpArgs];
+} else if (container) {
+  command = "docker";
+  commandArgs = ["exec", "-i", "-e", "PGPASSWORD", container, "pg_dump", ...pgDumpArgs];
+}
+
+const child = spawn(command, commandArgs, {
+  stdio: ["ignore", "pipe", "inherit"],
+  env: { ...process.env, PGPASSWORD: password },
+});
 const file = createWriteStream(outFile);
 child.stdout.pipe(file);
 
@@ -74,9 +117,11 @@ const code = await new Promise((resolveExit) => child.on("close", resolveExit));
 
 if (code !== 0) {
   console.error(`\npg_dump exited with ${code}. No usable backup was written.`);
-  if (!container) {
-    console.error("If pg_dump is not installed on this machine, re-run with --docker <container-name>.");
+  if (!container && !image) {
+    console.error("If pg_dump is not installed on this machine, re-run with --docker-image postgres:18.");
   }
+  console.error("If it reported a server version mismatch, the pg_dump you used is older than the");
+  console.error("server. Neon production runs Postgres 18 — use --docker-image postgres:18.");
   process.exit(1);
 }
 
