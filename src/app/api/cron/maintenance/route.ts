@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isDeployedEnvironment } from "@/lib/deployment";
 import { runMaintenance } from "@/lib/maintenance";
+import { logEvent, pingHeartbeat } from "@/lib/log-sink";
 
 /**
  * The scheduled half of housekeeping — see `vercel.json`'s `crons` entry,
@@ -50,5 +51,12 @@ export async function GET(request: NextRequest) {
   }
 
   const result = await runMaintenance();
+
+  logEvent({ event: "cron.maintenance.completed", ...result });
+  // Awaited, not fired and forgotten: the whole value of a heartbeat is
+  // that its absence means something, and a ping that may not have been
+  // sent makes the absence meaningless.
+  await pingHeartbeat();
+
   return NextResponse.json({ status: "ok", ...result });
 }

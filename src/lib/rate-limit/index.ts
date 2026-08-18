@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE_NAME } from "@/lib/session";
 import { isRateLimitEnforced, type PolicyName, RATE_LIMIT_POLICIES, type SubjectKind } from "./policy";
 import { countRequest, pruneExpiredCounters } from "./store";
+import { logEvent } from "@/lib/log-sink";
 
 export { RATE_LIMIT_POLICIES, isRateLimitEnforced } from "./policy";
 export type { PolicyName } from "./policy";
@@ -111,6 +112,15 @@ export async function enforceRateLimit(
      * fired, not how many attempts remain. On `auth-login-username` that
      * would confirm to someone probing that a username exists.
      */
+    /**
+     * The bucket and the count, never the subject. The subject is an IP
+     * or a hash of a session token; shipping it to a third-party sink
+     * would put a user identifier somewhere with its own retention and
+     * its own breach surface, to answer a question ("is something being
+     * hammered?") that the bucket alone answers.
+     */
+    logEvent({ event: "ratelimit.refused", level: "warn", bucket: policy.bucket, count: verdict.count });
+
     return NextResponse.json(
       { error: "Too many requests. Try again later." },
       { status: 429, headers: { "retry-after": String(verdict.retryAfterSeconds) } },
