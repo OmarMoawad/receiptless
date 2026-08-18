@@ -25,13 +25,9 @@
  *   DATABASE_URL=... node scripts/audit-suspect-totals.mjs --all   # include weak matches
  */
 import { Client } from "pg";
+import { requireDatabaseUrl } from "./lib/database-url.mjs";
 
 const includeWeak = process.argv.includes("--all");
-
-if (!process.env.DATABASE_URL) {
-  console.error("DATABASE_URL is required.");
-  process.exit(1);
-}
 
 /**
  * A number with **four or more** un-grouped integer digits and a two-digit
@@ -50,7 +46,7 @@ function buggyMinorFor(integerDigits, fractionDigits) {
   return Number(lastThree) * 100 + Number(fractionDigits);
 }
 
-const client = new Client({ connectionString: process.env.DATABASE_URL });
+const client = new Client({ connectionString: requireDatabaseUrl() });
 await client.connect();
 
 try {

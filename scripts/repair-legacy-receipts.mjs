@@ -24,15 +24,11 @@
  *   DATABASE_URL=... node scripts/repair-legacy-receipts.mjs --apply --owner <userId>
  */
 import { Client } from "pg";
+import { requireDatabaseUrl } from "./lib/database-url.mjs";
 
 const apply = process.argv.includes("--apply");
 const ownerFlag = process.argv.indexOf("--owner");
 const owner = ownerFlag === -1 ? null : process.argv[ownerFlag + 1];
-
-if (!process.env.DATABASE_URL) {
-  console.error("DATABASE_URL is required.");
-  process.exit(1);
-}
 
 /**
  * A merchant name that is really a date. The first scan produced these
@@ -61,7 +57,7 @@ const SELECT_SUSPECT_RECEIPTS = `
   ORDER BY r."createdAt"
 `;
 
-const client = new Client({ connectionString: process.env.DATABASE_URL });
+const client = new Client({ connectionString: requireDatabaseUrl() });
 await client.connect();
 
 try {
