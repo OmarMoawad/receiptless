@@ -3,6 +3,18 @@ import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
   agentRules: false,
+  /**
+   * `/api/health` reads the migration directory names to detect a database
+   * that is behind the deployed code (see lib/schema-drift.ts, and the
+   * 2026-08-19 incident that prompted it). Next only bundles files it can
+   * statically see being imported, and these are read at runtime, so they
+   * have to be traced explicitly or the check silently degrades to
+   * "unknown" in production — which is the failure mode it exists to
+   * remove.
+   */
+  outputFileTracingIncludes: {
+    "/api/health": ["./prisma/migrations/**/*"],
+  },
 };
 
 /**
