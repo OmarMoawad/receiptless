@@ -62,6 +62,26 @@ try {
     ORDER BY r."createdAt"
   `);
 
+  // Printed before any finding, so a run that reports nothing still tells
+  // you what it looked at. "No hits" and "nothing to look at" are very
+  // different answers and this is the line that separates them.
+  const { rows: totals } = await client.query(`
+    SELECT
+      COUNT(*) FILTER (WHERE source = 'EMAIL') AS email_receipts,
+      COUNT(*) FILTER (WHERE source = 'EMAIL' AND "rawPayload" IS NOT NULL) AS with_message,
+      COUNT(*) AS all_receipts
+    FROM "Receipt"
+  `);
+  const counts = totals[0];
+  console.log(`Connected. ${counts.all_receipts} receipt(s) total, ${counts.email_receipts} from email.`);
+  console.log(`${counts.with_message} of those retained their original message and can be checked here.`);
+  const unreadable = Number(counts.email_receipts) - Number(counts.with_message);
+  if (unreadable > 0) {
+    console.log(
+      `${unreadable} cannot be checked by any script — the message was not kept. Those need the source mail read by eye.`,
+    );
+  }
+
   const confirmed = [];
   const weak = [];
 
@@ -88,8 +108,7 @@ try {
   const money = (minor, currency) => `${(minor / 100).toFixed(2)} ${currency}`;
 
   if (confirmed.length === 0 && weak.length === 0) {
-    console.log(`Checked ${rows.length} email receipts with a retained message. Nothing matches the parsing bug.`);
-    console.log("Note: receipts whose message was not retained cannot be checked this way at all.");
+    console.log(`\nNothing among those ${rows.length} matches the parsing bug.`);
     process.exit(0);
   }
 
