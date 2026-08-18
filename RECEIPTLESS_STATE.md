@@ -20,13 +20,17 @@ date. That's a bug in this file, not a documentation nicety.
 > (#9/#10 engineering half), a real-browser end-to-end journey (#12), and
 > scheduled session cleanup (#14).
 >
+> **The production data audit is DONE, 2026-08-18** — run by Omar in
+> Neon's SQL editor against the production branch, with the results
+> below. #6's existing rows are closed. See "Production data audit" for
+> the evidence and for the two tooling bugs it exposed.
+>
 > **What is left of the review is now exactly the set that needs Omar**,
 > and it is short: the Vercel Pro purchase and the log drain (#3), a Neon
 > retention decision and a production restore (#1's remaining half), the
-> Surya weights licensing question (#9/#10), running
-> `scripts/repair-legacy-receipts.mjs` against production (#6's existing
-> rows), OAuth publication (#13), and the session-cap product decision
-> (#14). After that, Phase 2 sessions 3–7 are ordinary feature work.
+> Surya weights licensing question (#9/#10), OAuth publication (#13), and
+> the session-cap product decision (#14). After that, Phase 2 sessions
+> 3–7 are ordinary feature work.
 >
 > Superseded: **Phase 2 session 2b — the rest of the external review
 > list.** Session 2a is done (2026-08-16): **rate limiting and a
@@ -2011,6 +2015,72 @@ because it closes the only Session 10 exit criterion that went unmet.
    time; never convert on read with today's rate. **Needs Omar**: an FX
    rate source — most free tiers forbid commercial use, the same licensing
    trap already logged below for the Surya OCR weights.
+
+## Production data audit — DONE, 2026-08-18
+
+Run against the production branch in Neon's SQL editor. Recorded here
+with the numbers rather than as "checked, fine", because the point of
+the exercise was that nobody had ever looked.
+
+**Coverage was total, which is what makes the negative result mean
+something.** All **25** receipts in production came from email, and all
+**25** had retained their original message (`Receipt.rawPayload`), so
+every one could be re-read.
+
+**The amount-parsing bug (#8): zero matches.** No receipt's stored total
+equals what the old suffix-matching regex would have produced from a long
+number on its line. Full coverage plus zero hits is a real clean bill of
+health, not an absence of evidence.
+
+**Zero-total rows: four, and they were not the same thing.**
+
+| Merchant | Amount in the message? | Outcome |
+| --- | --- | --- |
+| Talabat (15 Aug) | no | deleted |
+| Talabat (3 Aug) | no | deleted |
+| Jumia Order Confirmation | no | deleted |
+| **Anthropic, PBC (5 Aug)** | **yes — $22.80** | **corrected, not deleted** |
+
+Three were order confirmations containing no money-shaped number
+anywhere. The fourth was a **real invoice**: `Pro Qty 1 $20.00`,
+`VAT - Egypt (14%) $2.80`, `Total $22.80`, `Amount paid $22.80` — stored
+as $0.00 because the entire receipt arrived on one unwrapped line and
+every adapter anchors its amount at end-of-line. Corrected to 2280 by a
+single UPDATE; the three others deleted. **Production now holds 22
+receipts, none with a zero total.**
+
+That message is also why `receipt-adapters/inline-summary.ts` exists,
+and why `INLINE_INVOICE_TEXT` is the first fixture in this repo derived
+from mail a real merchant actually sent (review item #8's "real
+anonymised fixtures"). The shape is preserved exactly; names, numbers
+and URLs are replaced.
+
+**Two tooling bugs this exposed, both fixed:**
+
+1. **`repair-legacy-receipts.mjs` would have deleted the Anthropic
+   receipt.** Its original form deleted every zero-total row. Destroying
+   a record of a real payment to tidy up a parser's mistake is strictly
+   worse than the mistake. It now classifies rows and refuses to delete
+   any whose message still contains an amount, whatever flags are passed.
+2. **SQL written against an unmerged migration aborted in production.**
+   The delete was first attempted with `status` and `failureReason` on
+   `InboundEmailDelivery` — columns this branch's migration adds and
+   production did not have. Postgres aborted the transaction and it was
+   correctly rolled back. The script now checks `information_schema`
+   first and refuses with a sentence.
+
+**Still open from this session's own work:** the `receipts_audit`
+read-only role in Neon was never made usable (three separate credential
+mistakes: a base64 password containing URL-structural characters, a
+clipboard that drifted between two commands, and a trailing newline from
+`openssl rand > file`). It is not on the critical path — every query
+above ran in the SQL editor — but **its password was exposed in a
+terminal and should be rotated or the role dropped.**
+
+**What no script can check, and nobody has:** whether the 22 remaining
+totals match the source mail. The parsing-bug audit rules out one
+specific failure; it does not confirm every amount is right. That needs
+eyes on the vault next to Gmail, and has not been done.
 
 ## Known open decisions
 
