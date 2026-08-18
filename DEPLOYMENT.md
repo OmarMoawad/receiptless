@@ -68,6 +68,9 @@ database.
 | `EMAIL_OAUTH_ENCRYPTION_KEY` | **if Gmail scanning** | Generate with `openssl rand -base64 32`. The built-in fallback is committed to this repo and is refused in any deployed environment. **Part of the all-or-nothing Gmail group — see the warning below** |
 | `OCR_SERVICE_URL` | if OCR | The self-hosted Surya service. Unset means automatic photo reading is **off and says so**, rather than failing at upload time |
 | `OCR_NONCOMMERCIAL_ACKNOWLEDGED` | if OCR | Must be exactly `true`. See section 3c before setting it — this is a licensing acknowledgement, not a feature flag |
+| `LOG_SINK_URL` | no | An NDJSON-over-HTTPS ingest endpoint (Axiom, Better Stack, Grafana Cloud…). Unset = no logs shipped |
+| `LOG_SINK_TOKEN` | if a sink | Bearer token for the above |
+| `HEARTBEAT_URL` | no | Pinged when the daily cron finishes. The monitor alerts on its **absence** |
 | `CRON_SECRET` | **yes** | Generate with `openssl rand -base64 32`. Vercel Cron sends it as `Authorization: Bearer …`; the maintenance job refuses to run in a deployed environment without it, so an unset value means housekeeping silently never happens |
 
 `missingProductionConfig` (`src/lib/deployment.ts`) enforces the required
@@ -169,6 +172,46 @@ that is not there, and it never lets the model be enabled by accident:
 Setting `OCR_NONCOMMERCIAL_ACKNOWLEDGED=true` is a statement that this
 particular deployment is not a commercial use, or that the weights have
 been replaced or licensed. It is not a way to make the warning go away.
+
+## 3d. Observability without Vercel Pro — deliberately partial
+
+Session 10 required error tracking **and** a log drain. Drains are a Pro
+feature and the account is on Hobby, so the criterion is **not met** and
+this section does not claim otherwise. What follows covers most of a
+drain's day-to-day value for free, and the gap is stated rather than
+glossed.
+
+| Question | Answered by | Cost |
+| --- | --- | --- |
+| Did anything throw? | Sentry | free tier |
+| What did the app do? (scans, imports, refusals, cron) | `LOG_SINK_URL` — see `src/lib/log-sink.ts` | free tier |
+| Is the site up / responding? | **External uptime monitor on `/api/health`** | free tier |
+| Did the cron stop running? | `HEARTBEAT_URL`, pinged on success | free tier |
+| Why did *this* invocation die? | **Nothing here. This is the gap.** | Pro |
+
+**The uptime monitor is the important one and it is not optional.** A
+function that times out writes nothing — no log line, no Sentry event,
+because no code of ours runs. Only something outside the process can
+report it. Point a free monitor at `/api/health` on a 1–3 minute
+interval; the documented RTO of 4 hours is dominated by *noticing*, so
+this moves the number that actually matters far more than log retention
+does.
+
+**What is still missing, precisely:** the platform-level stream. When an
+invocation is killed, you get a gap in the logs plus a monitor alert,
+not a stack trace. Vercel's dashboard keeps short-retention runtime logs,
+and that is the forensic window until Pro exists.
+
+**Why this is safe to ship:** every path in the app is resumable — the
+scan cursor only advances at the end, Postmark retries a non-2xx,
+reprocessing reuses its row, the cron catches up tomorrow. An unobserved
+failure costs a retry, not data. That property is what makes partial
+observability an acceptable trade rather than a hopeful one.
+
+Nothing is logged that could identify a person: the rate-limit line
+carries the bucket and the count, never the subject; message bodies,
+tokens and payloads are redacted by an enforced list in `log-sink.ts`,
+with tests.
 
 ## 4. Migrations — a release step, not a build step
 
