@@ -100,17 +100,31 @@ export async function ingestInboundEmail(email: InboundEmail): Promise<InboundEm
  * same idempotency, the same merchant-metadata protection, and the same
  * trusted-clock date handling.
  */
-export async function ingestEmailForUser(userId: string, email: InboundEmail): Promise<InboundEmailIngestionResult> {
-  try {
-    return await prisma.$transaction(async (tx) => {
-      const delivery = await tx.inboundEmailDelivery.create({
-        data: { provider: email.provider, providerMessageId: email.providerMessageId, userId },
-      });
-      // Our own clock, deliberately — the email's Date header is
+/**
+ * Parses one message against an **existing** delivery row and, if it
+ * yields a usable receipt, creates the receipt and links the row to it —
+ * all inside the caller's transaction.
+ *
+ * Extracted so that first-time ingestion and reprocessing share one
+ * implementation rather than two that drift. It takes a delivery id
+ * rather than creating one, which is what lets reprocessing reuse a row
+ * instead of deleting and recreating it: an earlier version deleted the
+ * row first, and a process killed between the delete and the re-insert
+ * lost the retained message permanently, with the Gmail cursor already
+ * past it. A `catch` cannot help there — a killed process runs no
+ * `catch`. Not deleting is the only fix that holds.
+ */
+async function applyParsedReceipt(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  deliveryId: string,
+  email: InboundEmail,
+): Promise<InboundEmailIngestionResult> {
+  // Our own clock, deliberately — the email's Date header is
       // sender-controlled and is validated against this inside the parser
       // rather than replacing it. Passing email.receivedAt here would let
       // a spoofed header both set and authorize its own purchase date.
-      const parsed = parseEmailReceipt(email, new Date());
+  const parsed = parseEmailReceipt(email, new Date());
 
       // The one field a receipt cannot do without. Previously a missing
       // total defaulted to zero and a receipt was created anyway, so an
@@ -125,9 +139,9 @@ export async function ingestEmailForUser(userId: string, email: InboundEmail): P
       // on the row so `reprocessUnparsedDeliveries` can run a better
       // parser over it later without re-fetching from Gmail — which
       // forwarded mail could not do at all, since Postmark keeps nothing.
-      if (parsed.totalMinor === null) {
-        return await markUnparsed(tx, delivery.id, email, parsed.adapterId, "no total could be parsed from this message");
-      }
+  if (parsed.totalMinor === null) {
+    return await markUnparsed(tx, deliveryId, email, parsed.adapterId, "no total could be parsed from this message");
+  }
 
       // Plausibility, not just parseability (review #8). A number the
       // parser is confident about can still be nonsense — a phone number
@@ -135,47 +149,68 @@ export async function ingestEmailForUser(userId: string, email: InboundEmail): P
       // worse than a missing one, because nothing about it looks wrong
       // later. Out-of-range values are treated exactly like an unreadable
       // total: retained, reviewable, reprocessable.
-      const implausible = implausibleTotalReason(parsed.totalMinor);
-      if (implausible) {
-        return await markUnparsed(tx, delivery.id, email, parsed.adapterId, implausible);
-      }
+  const implausible = implausibleTotalReason(parsed.totalMinor);
+  if (implausible) {
+    return await markUnparsed(tx, deliveryId, email, parsed.adapterId, implausible);
+  }
 
-      const merchant = await tx.merchant.upsert({
-        where: { name: parsed.merchant },
-        update: {},
-        create: { name: parsed.merchant },
+  const merchant = await tx.merchant.upsert({
+    where: { name: parsed.merchant },
+    update: {},
+    create: { name: parsed.merchant },
+  });
+  const receipt = await tx.receipt.create({
+    data: {
+      ownerId: userId,
+      merchantId: merchant.id,
+      currency: parsed.currency,
+      totalMinor: parsed.totalMinor,
+      purchasedAt: parsed.purchasedAt,
+      source: "EMAIL",
+      verification: "IMPORTED",
+      rawPayload: email.text,
+      items: parsed.items.length ? { create: parsed.items } : undefined,
+    },
+  });
+  await tx.inboundEmailDelivery.update({
+    where: { id: deliveryId },
+    data: {
+      receiptId: receipt.id,
+      adapterId: parsed.adapterId,
+      status: "imported",
+      failureReason: null,
+      // Cleared on success: the retained copy is a work queue entry,
+      // not an archive. The receipt keeps its own rawPayload.
+      retainedEmail: Prisma.DbNull,
+      attempts: { increment: 1 },
+      lastAttemptAt: new Date(),
+    },
+  });
+  return { status: "created" as const, receiptId: receipt.id };
+}
+
+export async function ingestEmailForUser(userId: string, email: InboundEmail): Promise<InboundEmailIngestionResult> {
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const delivery = await tx.inboundEmailDelivery.create({
+        data: { provider: email.provider, providerMessageId: email.providerMessageId, userId },
       });
-      const receipt = await tx.receipt.create({
-        data: {
-          ownerId: userId,
-          merchantId: merchant.id,
-          currency: parsed.currency,
-          totalMinor: parsed.totalMinor,
-          purchasedAt: parsed.purchasedAt,
-          source: "EMAIL",
-          verification: "IMPORTED",
-          rawPayload: email.text,
-          items: parsed.items.length ? { create: parsed.items } : undefined,
-        },
-      });
-      await tx.inboundEmailDelivery.update({
-        where: { id: delivery.id },
-        data: {
-          receiptId: receipt.id,
-          adapterId: parsed.adapterId,
-          status: "imported",
-          failureReason: null,
-          // Cleared on success: the retained copy is a work queue entry,
-          // not an archive. The receipt keeps its own rawPayload.
-          retainedEmail: Prisma.DbNull,
-          attempts: { increment: 1 },
-          lastAttemptAt: new Date(),
-        },
-      });
-      return { status: "created" as const, receiptId: receipt.id };
+      return await applyParsedReceipt(tx, userId, delivery.id, email);
     });
   } catch (error) {
     if (isUniqueConflict(error)) return { status: "duplicate" };
     throw error;
   }
+}
+
+/**
+ * Re-runs the current parser over a delivery that already exists, without
+ * ever removing it. See applyParsedReceipt for why that matters.
+ */
+export async function reapplyToExistingDelivery(
+  userId: string,
+  deliveryId: string,
+  email: InboundEmail,
+): Promise<InboundEmailIngestionResult> {
+  return prisma.$transaction(async (tx) => applyParsedReceipt(tx, userId, deliveryId, email));
 }

@@ -176,3 +176,65 @@ describe("the review list", () => {
     expect(await listUnimportedDeliveries(mine)).toEqual([]);
   });
 });
+
+/**
+ * The property that a killed process cannot violate.
+ *
+ * Reprocessing used to delete the delivery row and re-create it via
+ * ingestion. That is safe against an exception — there was a `catch` that
+ * restored it — and unsafe against the failure that actually happens on a
+ * serverless host: a process killed mid-flight runs no `catch`. The row
+ * and its retained message would be gone, with the Gmail cursor already
+ * past the message, and nothing to notice it with.
+ *
+ * Asserting the row **id is unchanged** is how that stays fixed: a
+ * delete-and-recreate cannot preserve it.
+ */
+describe("durability of the delivery row", () => {
+  it("reuses the same row when reprocessing succeeds", async () => {
+    const userId = await createUser();
+    const messageId = randomUUID();
+    await ingestEmailForUser(userId, email({ providerMessageId: messageId }));
+
+    const before = await prisma.inboundEmailDelivery.findFirst({ where: { userId, providerMessageId: messageId } });
+    await prisma.inboundEmailDelivery.updateMany({
+      where: { id: before!.id },
+      data: {
+        retainedEmail: { from: "receipts@example.com", subject: "Your order", text: PARSEABLE_BODY, receivedAt: null },
+      },
+    });
+
+    await reprocessUnparsedDeliveries(userId);
+
+    const after = await prisma.inboundEmailDelivery.findFirst({ where: { userId, providerMessageId: messageId } });
+    expect(after?.id).toBe(before!.id);
+    expect(after?.status).toBe("imported");
+    expect(after?.receiptId).toBeTruthy();
+  });
+
+  it("reuses the same row when reprocessing fails to parse", async () => {
+    const userId = await createUser();
+    const messageId = randomUUID();
+    await ingestEmailForUser(userId, email({ providerMessageId: messageId }));
+    const before = await prisma.inboundEmailDelivery.findFirst({ where: { userId, providerMessageId: messageId } });
+
+    await reprocessUnparsedDeliveries(userId);
+
+    const after = await prisma.inboundEmailDelivery.findFirst({ where: { userId, providerMessageId: messageId } });
+    expect(after?.id).toBe(before!.id);
+    // Still retained, so a future parser can still reach it.
+    expect(after?.retainedEmail).not.toBeNull();
+  });
+
+  it("never leaves a message with neither a row nor a receipt", async () => {
+    const userId = await createUser();
+    await ingestEmailForUser(userId, email());
+    await ingestEmailForUser(userId, email());
+
+    // Whatever each attempt does, every message is still accounted for.
+    await reprocessUnparsedDeliveries(userId);
+
+    const deliveries = await prisma.inboundEmailDelivery.count({ where: { userId } });
+    expect(deliveries).toBe(2);
+  });
+});

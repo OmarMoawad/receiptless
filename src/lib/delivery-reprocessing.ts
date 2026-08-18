@@ -1,7 +1,7 @@
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
 import type { InboundEmail } from "./inbound-email";
-import { ingestEmailForUser, type RetainedEmail } from "./inbound-email-ingestion";
+import { reapplyToExistingDelivery, type RetainedEmail } from "./inbound-email-ingestion";
 
 /**
  * Review findings #6 and #7: the parser now refuses to import a message
@@ -67,12 +67,12 @@ function toInboundEmail(
 /**
  * Runs the current parser over this owner's unparsed deliveries.
  *
- * Deletes the old delivery row and re-enters `ingestEmailForUser` rather
- * than reimplementing the parse-and-store path: a reprocessed message
- * must produce exactly what it would have produced if it had parsed the
- * first time — same idempotency, same merchant handling, same trusted
- * clock — and a second implementation would drift from the first the
- * moment either changed.
+ * Reuses the existing delivery row and re-enters the *same*
+ * parse-and-store path first-time ingestion uses, rather than
+ * reimplementing it: a reprocessed message must produce exactly what it
+ * would have produced if it had parsed the first time — same merchant
+ * handling, same plausibility checks, same trusted clock — and a second
+ * implementation would drift from the first the moment either changed.
  */
 export async function reprocessUnparsedDeliveries(
   userId: string,
@@ -106,58 +106,46 @@ export async function reprocessUnparsedDeliveries(
       delivery.retainedEmail,
     );
 
-    // The unique (provider, providerMessageId) constraint is what makes
-    // ingestion idempotent, so the old row has to go before the retry —
-    // otherwise every reprocess would report "duplicate". Scoped by id
-    // and by owner, and done per delivery so one failure cannot lose the
-    // rest of the queue.
-    await prisma.inboundEmailDelivery.delete({ where: { id: delivery.id } });
-
-    let outcome;
-    try {
-      outcome = await ingestEmailForUser(userId, email);
-    } catch (error) {
-      // Put the row back exactly as it was, then let the error surface:
-      // losing a retained message because the retry crashed would be a
-      // worse outcome than the bug that caused the crash.
-      await prisma.inboundEmailDelivery.create({
-        data: {
-          provider: delivery.provider,
-          providerMessageId: delivery.providerMessageId,
-          userId,
-          adapterId: delivery.adapterId,
-          status: "unparsed",
-          failureReason: delivery.failureReason,
-          attempts: delivery.attempts + 1,
-          lastAttemptAt: new Date(),
-          retainedEmail: delivery.retainedEmail as Prisma.InputJsonValue,
-          createdAt: delivery.createdAt,
-        },
-      });
-      throw error;
-    }
+    /**
+     * The row is **reused, never deleted**.
+     *
+     * An earlier version deleted the delivery first — the unique
+     * (provider, providerMessageId) key made that look necessary for
+     * re-ingestion — and restored it in a `catch` if the retry threw.
+     * That is safe against an exception and unsafe against the failure
+     * that actually happens on a serverless host: a process killed
+     * mid-flight runs no `catch`, so the row and its retained message
+     * vanished while the Gmail cursor had already moved past the
+     * message. One badly timed timeout, one silently lost receipt, and
+     * nothing to notice it with.
+     *
+     * Reusing the row removes the window entirely. There is no instant at
+     * which the message exists nowhere: the transaction either links it
+     * to a new receipt or leaves the row exactly as it was.
+     */
+    const outcome = await reapplyToExistingDelivery(userId, delivery.id, email);
 
     if (outcome.status === "created") {
       result.receiptsCreated += 1;
       continue;
     }
 
-    // Still unreadable. `ingestEmailForUser` has already written a fresh
-    // delivery row with attempts = 1, so carry the real attempt count
-    // forward and retire it once it has had enough tries.
+    // Still unreadable. applyParsedReceipt has already incremented
+    // attempts on the row; retire it once it has had enough tries.
     const attempts = delivery.attempts + 1;
     const discarded = attempts >= MAX_ATTEMPTS_BEFORE_DISCARD;
-    await prisma.inboundEmailDelivery.updateMany({
-      where: { provider: delivery.provider, providerMessageId: delivery.providerMessageId, userId },
-      data: {
-        attempts,
-        status: discarded ? "discarded" : "unparsed",
-        // A discarded message keeps its reason and loses its body: the
-        // owner still sees that something was skipped and why, without
-        // the app holding a copy of mail it has decided it cannot use.
-        retainedEmail: discarded ? Prisma.DbNull : undefined,
-      },
-    });
+    if (discarded) {
+      await prisma.inboundEmailDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: "discarded",
+          // A discarded message keeps its reason and loses its body: the
+          // owner still sees that something was skipped and why, without
+          // the app holding a copy of mail it has decided it cannot use.
+          retainedEmail: Prisma.DbNull,
+        },
+      });
+    }
 
     if (discarded) result.discarded += 1;
     else result.stillUnparsed += 1;
