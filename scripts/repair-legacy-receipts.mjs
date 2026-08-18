@@ -120,6 +120,22 @@ try {
   console.log("Merchant rows are left alone — a merchant with no receipts is harmless and may be shared.");
 } catch (error) {
   await client.query("ROLLBACK").catch(() => {});
+
+  /**
+   * 42501 is Postgres's insufficient_privilege. It is the *expected*
+   * outcome of running --apply with the read-only credential this
+   * script's own instructions recommend for the dry run, so it deserves
+   * a sentence rather than a stack trace. Nothing was changed: the
+   * ROLLBACK above is what guarantees that, not the permission error.
+   */
+  if (error?.code === "42501") {
+    console.error("\nRefused: this database role may read but not write. Nothing was changed.");
+    console.error("That is the read-only audit credential doing its job.");
+    console.error("To apply the repair, re-run with a role that has UPDATE and DELETE on Receipt,");
+    console.error("ReceiptItem and InboundEmailDelivery — and read the dry-run output first.");
+    process.exit(3);
+  }
+
   throw error;
 } finally {
   await client.end();
