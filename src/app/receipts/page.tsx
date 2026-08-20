@@ -6,6 +6,12 @@ import { getCurrentUserFromCookies } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { describeMatch, searchReceipts } from "@/lib/search";
 import { formatMinorUnits } from "@/lib/money";
+import {
+  type CoverageWindow,
+  describeDaysLeft,
+  formatCoverageDate,
+  returnWindow,
+} from "@/lib/coverage";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +20,27 @@ const VERIFICATION_LABEL: Record<string, string> = {
   IMPORTED: "Imported",
   MERCHANT_VERIFIED: "Merchant verified",
 };
+
+/**
+ * The soonest still-open return window across a receipt's items, or null.
+ * Shown on the list because a return deadline is the one thing about a
+ * receipt that stops being actionable if you see it a week late — Phase 2
+ * session 4 (RECEIPTLESS_STATE.md). Warranties are deliberately not shown
+ * here: they run for years, so they belong on /coverage rather than on
+ * every row of the vault.
+ */
+function soonestOpenReturn(
+  purchasedAt: Date,
+  items: Array<{ returnWindowDays: number | null }>,
+  now: Date,
+): CoverageWindow | null {
+  const open = items
+    .map((item) => returnWindow(purchasedAt, item.returnWindowDays, now))
+    .filter((window): window is CoverageWindow => window !== null && window.status !== "expired");
+  return open.length > 0
+    ? open.reduce((soonest, window) => (window.daysLeft < soonest.daysLeft ? window : soonest))
+    : null;
+}
 
 export default async function ReceiptsPage({
   searchParams,
@@ -86,6 +113,7 @@ export default async function ReceiptsPage({
   // Why each receipt matched, keyed by id — shown under the result so a
   // search that returns something unexpected explains itself instead of
   // looking broken.
+  const now = new Date();
   const matchReasons = new Map(hits.map((hit) => [hit.receipt.id, describeMatch(hit.matchedOn)]));
   const usedFallback = hits.length > 0 && hits.every((hit) => hit.matchedOn.viaFallback);
 
@@ -93,12 +121,17 @@ export default async function ReceiptsPage({
     <main className="flex flex-col gap-4 p-6 max-w-2xl mx-auto">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Your vault</h1>
-        <Link
-          href="/receipts/new"
-          className="rounded bg-emerald-600 text-white px-4 py-2 text-sm"
-        >
-          + Add receipt
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link href="/coverage" className="text-sm text-neutral-500">
+            Warranties and returns
+          </Link>
+          <Link
+            href="/receipts/new"
+            className="rounded bg-emerald-600 text-white px-4 py-2 text-sm"
+          >
+            + Add receipt
+          </Link>
+        </div>
       </div>
 
       {/*
@@ -150,10 +183,16 @@ export default async function ReceiptsPage({
 
       <ul className="flex flex-col gap-2">
         {receipts.map((r) => (
-          <li
-            key={r.id}
-            className="flex items-center justify-between border rounded px-4 py-3"
-          >
+          <li key={r.id} className="border rounded">
+            {/*
+              The vault list used to be a dead end — a row you could read
+              and not open. Phase 2 session 4 gives every receipt a page,
+              which is where warranty and return entry lives.
+            */}
+            <Link
+              href={`/receipts/${r.id}`}
+              className="flex items-center justify-between px-4 py-3"
+            >
             <div>
               <p className="font-medium">{r.merchant.name}</p>
               <p className="text-sm text-neutral-500">
@@ -170,8 +209,23 @@ export default async function ReceiptsPage({
               {matchReasons.get(r.id) && (
                 <p className="text-xs text-emerald-700 dark:text-emerald-500">{matchReasons.get(r.id)}</p>
               )}
+            {(() => {
+              const open = soonestOpenReturn(r.purchasedAt, r.items, now);
+              return open ? (
+                <p
+                  className={
+                    open.status === "ending-soon"
+                      ? "text-xs text-amber-700 dark:text-amber-500"
+                      : "text-xs text-emerald-700 dark:text-emerald-500"
+                  }
+                >
+                  Returnable until {formatCoverageDate(open.endsAt)} — {describeDaysLeft(open)}
+                </p>
+              ) : null;
+            })()}
             </div>
             <p className="font-mono">{formatMinorUnits(r.totalMinor, r.currency)}</p>
+            </Link>
           </li>
         ))}
       </ul>
