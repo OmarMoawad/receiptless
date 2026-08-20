@@ -18,7 +18,11 @@ import { dirname, resolve } from "node:path";
 const PHASES = [
   { name: "Canonical foundation", status: "done" },
   { name: "Reliable ingestion + accounts", status: "done" },
-  { name: "Vault maturity", status: "current", sessionsDone: 6, sessionsTotal: 8 },
+  // Done: 2a, 2b, 3, 4, 5. Session 1 (Vercel Pro + log drain) is
+  // *deferred*, not done — RECEIPTLESS_STATE.md says so in as many words,
+  // and counting it here was overstating the phase by one session. A
+  // deferred session is unfinished work; only a finished one counts.
+  { name: "Vault maturity", status: "current", sessionsDone: 5, sessionsTotal: 8 },
   { name: "Merchant API / SDK", status: "pending" },
   { name: "Merchant terminals & payment integration", status: "pending" },
   { name: "Native apps + platform NFC", status: "pending" },
