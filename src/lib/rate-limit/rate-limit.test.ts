@@ -4,6 +4,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { POST as loginPost } from "@/app/api/auth/login/route";
 import { POST as registerPost } from "@/app/api/auth/register/route";
+import { GET as csvExportGet } from "@/app/api/export/csv/route";
+import { GET as pdfExportGet } from "@/app/api/export/pdf/route";
+import { cookieHeader, registerTestUser } from "@/test/auth-helpers";
 import { clientIp, enforceRateLimit } from ".";
 import { isRateLimitEnforced, RATE_LIMIT_POLICIES } from "./policy";
 import { countRequest, pruneExpiredCounters } from "./store";
@@ -151,6 +154,36 @@ describe("subject resolution", () => {
  * (no route called anything).
  */
 describe("over the real routes", () => {
+  it(
+    "throttles a full-vault export, which is a GET the mutating check never saw",
+    async () => {
+      // Session-scoped, so a freshly registered user is its own bucket
+      // and this cannot collide with anything else in the suite.
+      const owner = await registerTestUser();
+      const limit = RATE_LIMIT_POLICIES["receipt-export"].limit;
+
+      let last;
+      for (let i = 0; i <= limit; i++) {
+        last = await csvExportGet(
+          new NextRequest("http://localhost/api/export/csv", { headers: cookieHeader(owner.token) }),
+        );
+        // Drain each body, or the refused request is racing open streams.
+        if (last.status === 200) await last.text();
+      }
+
+      expect(last?.status).toBe(429);
+      expect(Number(last?.headers.get("retry-after"))).toBeGreaterThan(0);
+
+      // Both formats share one bucket: the cost being limited is the vault
+      // walk, which is the same walk whichever file comes out of it.
+      const pdf = await pdfExportGet(
+        new NextRequest("http://localhost/api/export/pdf", { headers: cookieHeader(owner.token) }),
+      );
+      expect(pdf.status).toBe(429);
+    },
+    60_000,
+  );
+
   it(
     "answers 429 with Retry-After once login attempts from one IP run out",
     async () => {
