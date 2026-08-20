@@ -10,10 +10,16 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-> **Next action: Phase 2 session 5 — export, CSV then PDF.** Owner-scoped
-> and streamed rather than built in memory. CSV first because it is
-> mechanical; PDF second, and it needs a rendering choice that should be
-> flagged rather than picked silently. Needs nothing from anyone.
+> **Next action: Phase 2 session 6 — tax-category tagging.** Add
+> per-receipt and per-item categories plus a rules layer, then feed those
+> classifications into an exportable tax summary. Build on
+> `src/lib/categories.ts`. Needs nothing from anyone.
+>
+> **Session 5 (CSV and PDF export) is done, 2026-08-20.** Both exports are
+> authenticated, owner-scoped, batched, and streamed. CSV is an analysis-
+> friendly item-granularity archive; PDF is a readable receipt archive.
+> The vault links to both. Full detail under "Completed components (Phase
+> 2 session 5)" below.
 >
 > **Session 4 (warranty and return windows) is done, 2026-08-20.** The
 > `warrantyMonths` and `returnWindowDays` columns have been on
@@ -2039,9 +2045,9 @@ because it closes the only Session 10 exit criterion that went unmet.
    see "Completed components (Phase 2 session 4)" below.** `/coverage`
    carries the two lists, `/receipts/[id]` carries entry, and the columns
    the schema had held unread since Phase 0 are finally read.
-5. **Export: CSV and PDF.** Owner-scoped and streamed rather than built in
-   memory. CSV first (mechanical); PDF second, and it needs a rendering
-   choice — flag that rather than picking one silently.
+5. ~~**Export: CSV and PDF.**~~ **Done 2026-08-20 — see "Completed
+   components (Phase 2 session 5)" below.** Both formats are owner-scoped,
+   read in 100-receipt batches, and streamed to the client.
 6. **Tax-category tagging.** Per-receipt and per-item categories with a
    rules layer, feeding an exportable tax summary. Builds on
    `lib/categories.ts`.
@@ -2198,6 +2204,45 @@ test for contention-versus-regression. **20 of those are new** — 12 in
 existing test was modified, so the baseline this session started from was
 302 across 37 files. README's "298 across 36" was already one session
 stale before this one; it is now corrected.
+
+## Completed components (Phase 2 session 5 — CSV and PDF export)
+
+Done 2026-08-20. The vault now exposes two authenticated downloads:
+`GET /api/export/csv` for analysis and `GET /api/export/pdf` for a human-
+readable archive. Both query by `ownerId` at the database boundary, read
+100 receipts at a time, and stream their output instead of retaining the
+whole vault in application memory.
+
+**CSV contract**
+
+- One row per receipt item, with receipt fields repeated so the file is
+  usable without joins. A receipt with no items still produces one row.
+- Monetary values remain integer minor units; this preserves exact stored
+  data and avoids locale-dependent parsing.
+- UTF-8 BOM and CRLF make the download spreadsheet-friendly. Quotes,
+  commas, and newlines are escaped, and cells beginning with spreadsheet
+  formula sigils are prefixed to prevent formula injection.
+
+**PDF contract**
+
+- One receipt section per page with merchant, purchase date, totals,
+  provenance, items, coverage terms, notes, and the immutable receipt ID.
+- PDFKit was the approved rendering choice. The server route imports its
+  standalone distribution: live-app testing caught that the default entry
+  makes Turbopack resolve built-in Helvetica metrics below `/ROOT`, yielding
+  a production-shaped 500 even though isolated route tests pass.
+- An empty vault still yields a valid explanatory PDF.
+
+The vault page links directly to both downloads. Focused route tests cover
+authentication, owner isolation, CSV edge cases, PDF headers and bytes,
+and the empty-vault case. A live authenticated export was rendered to an
+image and inspected for clipping, overlap, and readability. Final evidence:
+the complete suite passed **338/338**, typecheck passed, lint passed with
+six pre-existing warnings and no errors, and the optimized Turbopack build
+passed with both export routes present. `npm audit` still reports the known
+high-severity `deepmerge-ts` advisory through Prisma's CLI/config chain;
+the offered fix is a Prisma major downgrade, so it was recorded rather than
+silently forced into this feature session.
 
 ## Known open decisions
 

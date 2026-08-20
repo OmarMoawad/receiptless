@@ -121,7 +121,21 @@ export default async function ReceiptsPage({
     <main className="flex flex-col gap-4 p-6 max-w-2xl mx-auto">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Your vault</h1>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <a
+            href="/api/export/csv"
+            className="text-sm text-neutral-500"
+            download
+          >
+            Export CSV
+          </a>
+          <a
+            href="/api/export/pdf"
+            className="text-sm text-neutral-500"
+            download
+          >
+            Export PDF
+          </a>
           <Link href="/coverage" className="text-sm text-neutral-500">
             Warranties and returns
           </Link>
