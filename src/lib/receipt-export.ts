@@ -30,6 +30,13 @@ const CSV_COLUMNS = [
 
 export const EXPORT_BATCH_SIZE = 100;
 
+/**
+ * How many bytes may sit in a response queue before the producer is
+ * asked to stop. Byte-counted rather than chunk-counted, so the limit
+ * means the same thing for a one-line CSV row and a rendered PDF page.
+ */
+export const EXPORT_HIGH_WATER_MARK = 64 * 1024;
+
 type ExportReceipt = Awaited<ReturnType<typeof fetchOwnedReceiptBatch>>[number];
 
 async function fetchOwnedReceiptBatch(ownerId: string, afterId?: string) {
@@ -91,25 +98,52 @@ function receiptRows(receipt: ExportReceipt): string[] {
   );
 }
 
+/**
+ * The row source as a plain async generator, kept separate from the
+ * stream so that cancelling a download can `return()` it. That runs the
+ * generator's own cleanup and, more importantly, stops the batch loop
+ * from issuing another query for an export nobody is reading any more.
+ */
+export async function* csvExportLines(ownerId: string): AsyncGenerator<string, void, undefined> {
+  yield `\uFEFF${CSV_COLUMNS.join(",")}\r\n`;
+  for await (const batch of ownedReceiptBatches(ownerId)) {
+    for (const receipt of batch) {
+      for (const row of receiptRows(receipt)) {
+        yield `${row}\r\n`;
+      }
+    }
+  }
+}
+
+/**
+ * `pull`, not `start`. Running the whole export inside `start` walks the
+ * vault to completion whether or not anything is reading it, so a slow
+ * client turns a streamed export back into a buffered one — just held in
+ * the stream's queue instead of an array. `pull` is called only when the
+ * queue has room, and a byte-counting strategy makes "room" mean a real
+ * 64 KB rather than a single row.
+ */
 export function csvExportStream(ownerId: string): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
-  return new ReadableStream({
-    async start(controller) {
-      try {
-        controller.enqueue(encoder.encode(`\uFEFF${CSV_COLUMNS.join(",")}\r\n`));
-        for await (const batch of ownedReceiptBatches(ownerId)) {
-          for (const receipt of batch) {
-            for (const row of receiptRows(receipt)) {
-              controller.enqueue(encoder.encode(`${row}\r\n`));
-            }
+  const lines = csvExportLines(ownerId);
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        while ((controller.desiredSize ?? 0) > 0) {
+          const next = await lines.next();
+          if (next.done) {
+            controller.close();
+            return;
           }
+          controller.enqueue(encoder.encode(next.value));
         }
-        controller.close();
-      } catch (error) {
-        controller.error(error);
-      }
+      },
+      async cancel() {
+        await lines.return(undefined);
+      },
     },
-  });
+    new ByteLengthQueuingStrategy({ highWaterMark: EXPORT_HIGH_WATER_MARK }),
+  );
 }
 
 function addArchiveHeader(doc: PDFKit.PDFDocument, title: string, subtitle?: string) {
@@ -192,43 +226,101 @@ function addReceiptPage(doc: PDFKit.PDFDocument, receipt: ExportReceipt, receipt
     doc.moveDown(0.3).fillColor("#404040").font("Helvetica").fontSize(10).text(receipt.notes);
   }
 
+  /**
+   * The footer sits below the bottom margin on purpose, and pdfkit
+   * treats anything past `page.maxY()` as an overflow — it opens a fresh
+   * page and prints the line there, so every receipt was ending with a
+   * blank page carrying nothing but its id. Dropping the bottom margin
+   * for the one call is pdfkit's own idiom for a footer; restoring it
+   * immediately keeps `ensureVerticalSpace` honest for the next receipt.
+   */
+  const bottomMargin = doc.page.margins.bottom;
+  doc.page.margins.bottom = 0;
   doc
     .fillColor("#737373")
     .font("Helvetica")
     .fontSize(8)
     .text(`Receipt ID: ${receipt.id}`, 54, doc.page.height - 38, { align: "right", width: 504 });
+  doc.page.margins.bottom = bottomMargin;
 }
 
 export function pdfExportStream(ownerId: string): ReadableStream<Uint8Array> {
-  return new ReadableStream({
-    start(controller) {
-      const doc = new PDFDocument({ autoFirstPage: false, margin: 54, size: "A4" });
-      doc.info.Title = "Receiptless receipt archive";
-      doc.info.Author = "Receiptless";
-      doc.on("data", (chunk: Buffer) => controller.enqueue(new Uint8Array(chunk)));
-      doc.on("end", () => controller.close());
-      doc.on("error", (error) => controller.error(error));
+  let doc: PDFKit.PDFDocument;
+  let cancelled = false;
+  let releaseBackpressure: (() => void) | null = null;
 
-      void (async () => {
-        try {
-          let receiptNumber = 0;
-          for await (const batch of ownedReceiptBatches(ownerId)) {
-            for (const receipt of batch) {
-              receiptNumber += 1;
-              addReceiptPage(doc, receipt, receiptNumber);
+  /** Resolved by `pull` once the consumer has taken enough to want more. */
+  const drained = () =>
+    new Promise<void>((resolve) => {
+      releaseBackpressure = resolve;
+    });
+
+  const wake = () => {
+    releaseBackpressure?.();
+    releaseBackpressure = null;
+  };
+
+  return new ReadableStream<Uint8Array>(
+    {
+      start(controller) {
+        doc = new PDFDocument({ autoFirstPage: false, margin: 54, size: "A4" });
+        doc.info.Title = "Receiptless receipt archive";
+        doc.info.Author = "Receiptless";
+
+        doc.on("data", (chunk: Buffer) => {
+          // After a cancel the controller will not accept a chunk, and
+          // the throw would land in an event handler with nothing to
+          // catch it. pdfkit can emit once more before it stops.
+          if (cancelled) return;
+          controller.enqueue(new Uint8Array(chunk));
+          if ((controller.desiredSize ?? 0) <= 0) doc.pause();
+        });
+        doc.on("end", () => {
+          if (!cancelled) controller.close();
+        });
+        doc.on("error", (error) => {
+          if (!cancelled) controller.error(error);
+        });
+
+        void (async () => {
+          try {
+            let receiptNumber = 0;
+            for await (const batch of ownedReceiptBatches(ownerId)) {
+              for (const receipt of batch) {
+                if (cancelled) return;
+                receiptNumber += 1;
+                addReceiptPage(doc, receipt, receiptNumber);
+                // Pausing the output alone would only move the rest of
+                // the archive into pdfkit's own buffer, so the render
+                // loop waits with it.
+                if (doc.isPaused()) await drained();
+              }
             }
-          }
 
-          if (receiptNumber === 0) {
-            doc.addPage();
-            addArchiveHeader(doc, "Receiptless archive", `Generated ${new Date().toISOString()}`);
-            doc.fillColor("#525252").font("Helvetica").fontSize(11).text("No receipts in this vault.");
+            if (cancelled) return;
+            if (receiptNumber === 0) {
+              doc.addPage();
+              addArchiveHeader(doc, "Receiptless archive", `Generated ${new Date().toISOString()}`);
+              doc.fillColor("#525252").font("Helvetica").fontSize(11).text("No receipts in this vault.");
+            }
+            doc.end();
+          } catch (error) {
+            doc.destroy(error instanceof Error ? error : new Error("PDF export failed"));
           }
-          doc.end();
-        } catch (error) {
-          doc.destroy(error instanceof Error ? error : new Error("PDF export failed"));
-        }
-      })();
+        })();
+      },
+      pull() {
+        doc.resume();
+        wake();
+      },
+      cancel() {
+        // Order matters: the flag is what the render loop and the event
+        // handlers check, so it has to be set before anything is woken.
+        cancelled = true;
+        wake();
+        doc.destroy();
+      },
     },
-  });
+    new ByteLengthQueuingStrategy({ highWaterMark: EXPORT_HIGH_WATER_MARK }),
+  );
 }
