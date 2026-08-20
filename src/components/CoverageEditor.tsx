@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { MAX_RETURN_WINDOW_DAYS, MAX_WARRANTY_MONTHS } from "@/lib/validation";
 
 export type EditableItem = {
   id: string;
@@ -18,11 +19,11 @@ export type EditableItem = {
  * it as it was", and a person who deletes the number in a box means the
  * first thing, not the second.
  */
-function toPayloadValue(raw: string): number | null | undefined {
+export function parseCoverageInput(raw: string, maximum: number): number | null | undefined {
   const trimmed = raw.trim();
   if (trimmed === "") return null;
   const value = Number(trimmed);
-  return Number.isInteger(value) && value > 0 ? value : undefined;
+  return Number.isInteger(value) && value > 0 && value <= maximum ? value : undefined;
 }
 
 function CoverageFields({
@@ -45,6 +46,7 @@ function CoverageFields({
         <input
           type="number"
           min={1}
+          max={MAX_WARRANTY_MONTHS}
           inputMode="numeric"
           value={warranty}
           onChange={(e) => onWarranty(e.target.value)}
@@ -57,6 +59,7 @@ function CoverageFields({
         <input
           type="number"
           min={1}
+          max={MAX_RETURN_WINDOW_DAYS}
           inputMode="numeric"
           value={returnDays}
           onChange={(e) => onReturnDays(e.target.value)}
@@ -77,8 +80,8 @@ function ItemRow({ receiptId, item }: { receiptId: string; item: EditableItem })
   const [saved, setSaved] = useState(false);
 
   async function save() {
-    const warrantyMonths = toPayloadValue(warranty);
-    const returnWindowDays = toPayloadValue(returnDays);
+    const warrantyMonths = parseCoverageInput(warranty, MAX_WARRANTY_MONTHS);
+    const returnWindowDays = parseCoverageInput(returnDays, MAX_RETURN_WINDOW_DAYS);
     if (warrantyMonths === undefined || returnWindowDays === undefined) {
       setError("Use whole numbers of months and days, or leave a box empty.");
       return;
@@ -146,8 +149,8 @@ function AddItem({ receiptId }: { receiptId: string }) {
       setError("Give the item a name.");
       return;
     }
-    const warrantyMonths = toPayloadValue(warranty);
-    const returnWindowDays = toPayloadValue(returnDays);
+    const warrantyMonths = parseCoverageInput(warranty, MAX_WARRANTY_MONTHS);
+    const returnWindowDays = parseCoverageInput(returnDays, MAX_RETURN_WINDOW_DAYS);
     if (warrantyMonths === undefined || returnWindowDays === undefined) {
       setError("Use whole numbers of months and days, or leave a box empty.");
       return;

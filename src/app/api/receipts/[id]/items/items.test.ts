@@ -75,6 +75,20 @@ describe("adding an item to an existing receipt", () => {
     // 404 rather than 403: Bob learns nothing about whether that id exists.
     expect(response.status).toBe(404);
   });
+
+  it.each([
+    [{ name: "Kettle", warrantyMonths: 601 }, "warranty"],
+    [{ name: "Kettle", returnWindowDays: 3651 }, "return window"],
+    [{ name: "Kettle", unitPriceMinor: -1 }, "negative price"],
+    [{ name: "Kettle", totalPriceMinor: 2_147_483_648 }, "out-of-range price"],
+  ])("rejects an invalid item payload: %s", async (payload, _label) => {
+    const receiptId = await newReceipt(alice.token);
+    const response = await addItem(
+      jsonRequest(`http://localhost/api/receipts/${receiptId}/items`, payload, alice.token),
+      { params: Promise.resolve({ id: receiptId }) },
+    );
+    expect(response.status).toBe(400);
+  });
 });
 
 describe("editing an item's coverage", () => {
@@ -127,6 +141,15 @@ describe("editing an item's coverage", () => {
 
   it("rejects a warranty longer than any real one", async () => {
     const response = await patch({ warrantyMonths: 24_000 }, alice.token);
+    expect(response.status).toBe(400);
+  });
+
+  it.each([
+    [{}, "an empty body"],
+    [{ merchantName: "Not a coverage field" }, "an unknown-only body"],
+    [{ warrantyMonth: 12 }, "a misspelled coverage field"],
+  ])("rejects %s rather than reporting a successful no-op", async (body, _label) => {
+    const response = await patch(body, alice.token);
     expect(response.status).toBe(400);
   });
 

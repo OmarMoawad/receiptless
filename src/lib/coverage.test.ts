@@ -108,6 +108,18 @@ describe("warranty and return windows", () => {
     expect(warrantyWindow(new Date("2025-09-05T00:00:00Z"), 12, NOW)?.status).toBe("ending-soon");
     expect(warrantyWindow(new Date("2026-08-01T00:00:00Z"), 24, NOW)?.status).toBe("active");
   });
+
+  it("uses the UTC calendar day when an offset timestamp crosses midnight", () => {
+    const purchasedAt = new Date("2026-08-15T23:30:00-05:00");
+    const now = new Date("2026-08-16T12:00:00Z");
+
+    expect(returnWindow(purchasedAt, 1, now)?.endsAt.toISOString()).toBe(
+      "2026-08-17T00:00:00.000Z",
+    );
+    expect(warrantyWindow(purchasedAt, 1, now)?.endsAt.toISOString()).toBe(
+      "2026-09-16T00:00:00.000Z",
+    );
+  });
 });
 
 describe("listCoverage", () => {

@@ -13,6 +13,18 @@ const SOURCES = [
 
 const categorySchema = z.enum(CATEGORIES);
 const sourceSchema = z.enum(SOURCES);
+export const MAX_WARRANTY_MONTHS = 600;
+export const MAX_RETURN_WINDOW_DAYS = 3650;
+const POSTGRES_INT_MAX = 2_147_483_647;
+
+export const warrantyMonthsSchema = z.number().int().positive().max(MAX_WARRANTY_MONTHS);
+export const returnWindowDaysSchema = z.number().int().positive().max(MAX_RETURN_WINDOW_DAYS);
+export const minorUnitSchema = z.number().int().min(0).max(POSTGRES_INT_MAX);
+
+const coverageShape = {
+  warrantyMonths: warrantyMonthsSchema,
+  returnWindowDays: returnWindowDaysSchema,
+};
 
 export const receiptItemInputSchema = z.object({
   name: z.string().trim().min(1).max(200),
@@ -23,8 +35,8 @@ export const receiptItemInputSchema = z.object({
   totalPriceMinor: z.number().int(),
   taxMinor: z.number().int().optional(),
   discountMinor: z.number().int().optional(),
-  warrantyMonths: z.number().int().positive().optional(),
-  returnWindowDays: z.number().int().positive().optional(),
+  warrantyMonths: coverageShape.warrantyMonths.optional(),
+  returnWindowDays: coverageShape.returnWindowDays.optional(),
 });
 
 export const createReceiptSchema = z.object({
@@ -71,12 +83,19 @@ export const merchantReceiptSchema = createReceiptSchema.extend({
  * offers, and they stop a typo'd 24000 from rendering a date in the year
  * 4000 as though it were meaningful.
  */
-export const itemCoverageSchema = z.object({
-  warrantyMonths: z.number().int().positive().max(600).nullable().optional(),
-  returnWindowDays: z.number().int().positive().max(3650).nullable().optional(),
-});
+export const itemCoverageSchema = z
+  .object({
+    warrantyMonths: coverageShape.warrantyMonths.nullable().optional(),
+    returnWindowDays: coverageShape.returnWindowDays.nullable().optional(),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      value.warrantyMonths !== undefined || value.returnWindowDays !== undefined,
+    { message: "Provide at least one coverage field" },
+  );
 
-export const receiptItemCreateSchema = itemCoverageSchema.extend({
+export const receiptItemCreateSchema = z.object({
   name: z.string().trim().min(1).max(200),
   category: categorySchema.default("OTHER"),
   quantity: z.number().positive().default(1),
@@ -85,6 +104,8 @@ export const receiptItemCreateSchema = itemCoverageSchema.extend({
   // entry records no items at all, and two of the four email adapters
   // return none). Making them state a price they may not have to hand
   // would be an obstacle in front of the only feature they came for.
-  unitPriceMinor: z.number().int().default(0),
-  totalPriceMinor: z.number().int().default(0),
+  unitPriceMinor: minorUnitSchema.default(0),
+  totalPriceMinor: minorUnitSchema.default(0),
+  warrantyMonths: coverageShape.warrantyMonths.nullable().optional(),
+  returnWindowDays: coverageShape.returnWindowDays.nullable().optional(),
 });
