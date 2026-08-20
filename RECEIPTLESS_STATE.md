@@ -10,11 +10,20 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-> **Next action: Phase 2 session 4 — warranty and return windows,
-> surfaced.** The schema already carries `warrantyMonths` and
-> `returnWindowDays` on every item and nothing displays them, which makes
-> it the most direct answer to ROADMAP.md's own "I need to return this"
-> use case. Needs nothing from anyone.
+> **Next action: Phase 2 session 5 — export, CSV then PDF.** Owner-scoped
+> and streamed rather than built in memory. CSV first because it is
+> mechanical; PDF second, and it needs a rendering choice that should be
+> flagged rather than picked silently. Needs nothing from anyone.
+>
+> **Session 4 (warranty and return windows) is done, 2026-08-20.** The
+> `warrantyMonths` and `returnWindowDays` columns have been on
+> `ReceiptItem` since Phase 0 as a "lightweight seed"; nothing had ever
+> read them. `/coverage` now answers "still under warranty" and
+> "returnable until" as two separate lists, `/receipts/[id]` is the first
+> per-receipt page this app has had, and coverage can be entered against
+> any receipt. Full detail under "Completed components (Phase 2 session
+> 4)" below, including two limitations that are recorded rather than
+> fixed.
 >
 > **Session 3 (real search) is done, 2026-08-19.** Postgres full text with
 > a trigger-maintained `tsvector`, weighted merchant > items > notes, GIN
@@ -2026,10 +2035,10 @@ because it closes the only Session 10 exit criterion that went unmet.
    search UI that shows *why* a receipt matched. Semantic search is
    explicitly out of scope — revisit once full-text is real and there's a
    concrete reason to want more.
-4. **Warranty and return windows, surfaced.** The schema already carries
-   this metadata and nothing displays it. A "still under warranty" and
-   "returnable until" view, plus per-receipt entry — the most direct
-   answer to ROADMAP.md's own "I need to return this" use case.
+4. ~~**Warranty and return windows, surfaced.**~~ **Done 2026-08-20 —
+   see "Completed components (Phase 2 session 4)" below.** `/coverage`
+   carries the two lists, `/receipts/[id]` carries entry, and the columns
+   the schema had held unread since Phase 0 are finally read.
 5. **Export: CSV and PDF.** Owner-scoped and streamed rather than built in
    memory. CSV first (mechanical); PDF second, and it needs a rendering
    choice — flag that rather than picking one silently.
@@ -2106,6 +2115,89 @@ terminal and should be rotated or the role dropped.**
 totals match the source mail. The parsing-bug audit rules out one
 specific failure; it does not confirm every amount is right. That needs
 eyes on the vault next to Gmail, and has not been done.
+
+## Completed components (Phase 2 session 4 — warranty and return windows)
+
+Done 2026-08-20. ROADMAP.md names "I need to return this" as a use case
+the vault exists to answer, and until this session the vault could not
+answer it: `ReceiptItem.warrantyMonths` and `ReceiptItem.returnWindowDays`
+were added in Phase 0 as a "lightweight seed for the warranty/return
+layer" and **no code had ever read either column** — not a route, not a
+page, not a report.
+
+**What exists now**
+
+- `src/lib/coverage.ts` — the date arithmetic and the owner-scoped query,
+  in one module, the way `lib/search.ts` holds both for search.
+- `src/app/coverage/page.tsx` — "Returnable" and "Still under warranty"
+  as two lists, ordered by whatever runs out first.
+- `src/app/receipts/[id]/page.tsx` — **the first per-receipt page this
+  application has ever had.** The vault list was a row you could read and
+  not open.
+- `POST /api/receipts/[id]/items` and
+  `PATCH /api/receipts/[id]/items/[itemId]` — add an item, set or clear
+  its coverage. Both rate-limited on `receipt-write` and both scoped by
+  `(receipt id, ownerId)` in the query itself, not by the URL nesting.
+- The vault list shows an open return deadline per receipt, and links
+  through. Warranties are deliberately **not** on that list: a three-year
+  warranty on every row is noise, a return window closing on Tuesday is
+  not.
+
+**Decisions worth naming, because each one could reasonably have gone the
+other way**
+
+- **Day-granular UTC, not timestamps.** A warranty is a calendar
+  statement. Two receipts from the same day — one stamped just after
+  midnight, one just before — must expire together, or the answer to "can
+  I still return this?" depends on what time the merchant's system fired
+  the receipt. Month arithmetic clamps to the end of a shorter month: one
+  month from 31 January is 28 February.
+- **The last day counts as covered.** A 14-day window bought 14 days ago
+  ends *today*, not yesterday.
+- **No cover and expired cover are different answers.** A null warranty
+  means nobody ever told us. Rendering that as "expired" would invent a
+  fact about the merchant's terms.
+- **Expired is hidden, never dropped.** Proving something *was* under
+  warranty on a given date is a real reason to keep a receipt.
+- **PATCH edits the two coverage columns and nothing else.** It cannot
+  become a way to rewrite a merchant-pushed receipt's prices or totals —
+  amending what a merchant attested is a different action with a
+  different trust question attached, and it is not this one.
+
+**Limitations, recorded rather than fixed**
+
+1. **Coverage is entered by hand, always.** Nothing extracts a warranty
+   or a return window from a receipt automatically — not the OCR path,
+   not any of the four email adapters. Real merchant mail states these
+   terms in prose ("30-day returns"), and parsing that reliably is its
+   own piece of work, not a rider on this one. Until then every value on
+   `/coverage` is one somebody typed.
+2. **The add-item route exists because manual entry captures no items at
+   all.** `ReceiptForm` sends a merchant, a total and a date — never a
+   line item — and the `key-value` and `inline-summary` adapters return
+   an empty item list too. So a receipt frequently has nothing to attach
+   coverage *to*, and the route works around that rather than fixing it.
+   The real fix is item entry in `ReceiptForm`, which belongs with
+   session 6's per-item categories.
+3. **Not click-through verified in a browser.** `npm run build` passes
+   and both new pages are in the route table, and this repo has been
+   caught before by exactly the gap between "it builds" and "it works
+   when a person clicks it" (Session 4's follow-up, Session 5's). The
+   Playwright journey from session 2b does not cover these pages yet.
+
+**Verification**
+
+`npm run typecheck` and `npm run lint` clean (lint's three warnings are
+pre-existing), `npm run build` passes with `/coverage`,
+`/receipts/[id]`, `/api/receipts/[id]/items` and
+`/api/receipts/[id]/items/[itemId]` all in the route table, and the suite
+is **322 tests across 39 files, all passing**, run with
+`--maxWorkers=1 --fileParallelism=false` per this file's own decisive
+test for contention-versus-regression. **20 of those are new** — 12 in
+`src/lib/coverage.test.ts`, 8 in the item routes' own file — and no
+existing test was modified, so the baseline this session started from was
+302 across 37 files. README's "298 across 36" was already one session
+stale before this one; it is now corrected.
 
 ## Known open decisions
 

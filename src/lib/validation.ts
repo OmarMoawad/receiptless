@@ -57,3 +57,34 @@ export const merchantReceiptSchema = createReceiptSchema.extend({
   merchantWebsite: z.string().url().optional(),
   claimTtlMinutes: z.number().int().positive().max(60 * 24 * 30).default(60 * 24),
 });
+
+/**
+ * Phase 2 session 4: entering warranty/return metadata after the fact.
+ *
+ * Both fields are `.nullable()` here where `receiptItemInputSchema` above
+ * has them merely optional, and the difference is the whole point of a
+ * PATCH: *absent* means "leave this as it is", *null* means "clear it".
+ * Collapsing the two would make a mistyped warranty impossible to undo.
+ *
+ * The upper bounds are sanity limits, not policy — 50 years of warranty
+ * and 10 years of returns are both far beyond anything a real merchant
+ * offers, and they stop a typo'd 24000 from rendering a date in the year
+ * 4000 as though it were meaningful.
+ */
+export const itemCoverageSchema = z.object({
+  warrantyMonths: z.number().int().positive().max(600).nullable().optional(),
+  returnWindowDays: z.number().int().positive().max(3650).nullable().optional(),
+});
+
+export const receiptItemCreateSchema = itemCoverageSchema.extend({
+  name: z.string().trim().min(1).max(200),
+  category: categorySchema.default("OTHER"),
+  quantity: z.number().positive().default(1),
+  // Defaulted rather than required: this route exists so someone can track
+  // a warranty on a receipt whose line items were never captured (manual
+  // entry records no items at all, and two of the four email adapters
+  // return none). Making them state a price they may not have to hand
+  // would be an obstacle in front of the only feature they came for.
+  unitPriceMinor: z.number().int().default(0),
+  totalPriceMinor: z.number().int().default(0),
+});
