@@ -50,6 +50,31 @@ date. That's a bug in this file, not a documentation nicety.
 > also a real obstacle: Vercel takes bank-issued cards only, and rejects
 > the prepaid and virtual cards reachable from Egypt.
 >
+> **What un-defers it**, recorded because a deferral that only says "not
+> now" gets re-litigated every time someone reads it, and because the
+> trigger below is not the one this entry was originally about:
+>
+> 1. **Receiptless taking money — this is the real one.** Vercel's Hobby
+>    tier is for personal, non-commercial use; a commercial project is
+>    expected to be on a paid plan. The day this charges anyone, a paid
+>    plan stops being an observability upgrade and becomes a terms
+>    requirement, and the log drain arrives as a side effect rather than
+>    as the reason. Check the current plan terms at that point rather
+>    than trusting this line — it is a summary of someone else's policy,
+>    which is the kind of fact that changes without telling you.
+> 2. **A killed invocation that actually needs a post-mortem.** The gap
+>    is specific: app-level logging dies with the process, so a function
+>    killed mid-flight leaves nothing behind. One real incident where
+>    that silence is what blocks the diagnosis is enough to justify the
+>    plan on its own merits. None has happened yet.
+> 3. **A bank-issued card becoming available.** Only removes the
+>    obstacle; it is not a reason on its own, and buying the plan because
+>    payment finally works would be the wrong order.
+>
+> Until one of those, staying on Hobby is the correct call and not a
+> compromise: items one through three of the paragraph above mean Pro
+> currently buys one narrow capability that nothing has yet needed.
+>
 > Superseded: **Phase 2 session 1 — upgrade Vercel to Pro, then wire
 > the log drain. It needs Omar and nothing else in it can start.**
 > Session 2b is done (2026-08-16) and closed every review item that an

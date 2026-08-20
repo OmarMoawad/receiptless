@@ -141,11 +141,25 @@ choices) vs. what's solo-buildable right now. This bullet list is the
 
 ## Phase 2 — Vault maturity (Months 2–3)
 
-- **First: upgrade Vercel to Pro and finish the observability criterion.**
-  Session 10 required error tracking *and* a log drain; the drain is
-  Pro-only and this account is on Hobby, so it is the one exit criterion
-  that went unmet. It needs a purchase, not engineering time, which is why
-  it leads the milestone rather than trailing it.
+- ~~**First: upgrade Vercel to Pro and finish the observability
+  criterion.**~~ **Deferred, and no longer first.** Session 10 required
+  error tracking *and* a log drain; the drain is Pro-only and this account
+  is on Hobby, so it went unmet. Investigating it in Session 1 shrank it to
+  almost nothing: preview protection is already on Hobby, Hobby function
+  duration is already 300s, and the drain's day-to-day value is covered for
+  free by the uptime monitor, cron heartbeat and app-level logging live
+  since 2026-08-19. Pro still buys exactly one thing — the platform log
+  stream for post-mortem of a *killed* invocation, where app-level logging
+  dies with the process.
+
+  It leads nothing now. The trigger that changes that is **charging
+  anyone money**: Vercel's Hobby tier is for personal, non-commercial use,
+  so the day Receiptless takes payment a paid plan becomes a terms
+  requirement rather than an observability upgrade, and the drain arrives
+  with it. A real incident that a killed-invocation post-mortem would have
+  solved is the other trigger. See `RECEIPTLESS_STATE.md` — "What
+  un-defers it" — for all three, including why a working payment card is
+  not a reason on its own.
 - Real search (full-text, eventually semantic) across merchants, items, notes
 - Warranty/return views surfaced in the UI, not just stored in the schema
 - CSV/PDF export, tax-category tagging, multi-currency with historical FX
