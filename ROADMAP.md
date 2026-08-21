@@ -163,7 +163,9 @@ choices) vs. what's solo-buildable right now. This bullet list is the
 - Real search (full-text, eventually semantic) across merchants, items, notes
 - Warranty/return views surfaced in the UI, not just stored in the schema
 - ~~CSV/PDF export~~ (session 5), ~~tax-category tagging~~ (session 6),
-  multi-currency with historical FX (session 7 — needs an FX rate source)
+  ~~multi-currency with historical FX~~ (session 7 — steps 1-3 done
+  2026-08-21; the rate-provider adapter still needs Omar, and manual rate
+  entry makes the feature work end to end meanwhile)
 
 ## Phase 3 — Merchant API / SDK (Months 3–5)
 
