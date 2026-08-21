@@ -63,6 +63,15 @@ export const RATE_LIMIT_POLICIES = {
   "provider-sync": { bucket: "provider-sync", subject: "session", limit: 12, windowSeconds: 5 * MINUTE },
   /** OCR is the most expensive thing a logged-in user can ask for. */
   "receipt-ocr": { bucket: "receipt-ocr", subject: "session", limit: 30, windowSeconds: HOUR },
+  /**
+   * A full-vault export. Cheaper per request than OCR in money, dearer in
+   * work: both formats walk every receipt and every item the caller owns,
+   * and the PDF renders a page per receipt on top of that. Session-scoped
+   * because the cost is proportional to one vault, and set below
+   * `receipt-ocr` because a person exports their archive a handful of
+   * times a day, not thirty.
+   */
+  "receipt-export": { bucket: "receipt-export", subject: "session", limit: 12, windowSeconds: HOUR },
   /** Receipt create/upload: generous for a person, bounded for a script. */
   "receipt-write": { bucket: "receipt-write", subject: "session", limit: 120, windowSeconds: HOUR },
   /**
