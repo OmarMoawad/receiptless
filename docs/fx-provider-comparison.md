@@ -34,7 +34,7 @@ eliminates most of the shortlist on its own.
 | **CurrencyAPI** free | Yes | **No — explicitly "Private Use"** | — | Disqualified for a commercial product by its own pricing page. |
 | **CurrencyAPI** Small | Yes | Yes | Yes | $9.99/mo, 15,000 req/mo. Mid-market rates. The cheapest unambiguously-licensed general feed found. |
 | **Open Exchange Rates** | Yes, but **historical/time-series is Enterprise-tier** | — | Yes | $47/mo for the tier that has the endpoint. Disproportionate to the need. |
-| **CBE via Apify actor** | **Yes — official CBE rates**, buy/sell/mid, 19 currencies | Pay-per-result | Yes (Apify account) | ~$11/1,000 results, so roughly **$0.50–$2.50 for a year** of rates. Community-maintained, not an official CBE product. |
+| **CBE via Apify actor** | **Yes — official CBE rates**, buy/sell/mid, 19 currencies | Pay-per-result on the **free** plan, no card | Yes (Apify account, no card) | Free tier is **$15/1,000 results** ($11 only at the discounted Business tier), drawn from Apify's **$5/month free credit**. Receiptless fetches once per pair per date, so real usage is a few results a month — well inside the free credit. Community-maintained, not an official CBE product. |
 | **CBE direct** | Authoritative | Free | none | **Blocked.** A request to the CBE rates page returns "The requested URL was rejected" — there is a WAF in front of it and no documented public API. A serverless function would be blocked the same way. |
 
 ## Why the volume argument matters more than the price
@@ -50,13 +50,32 @@ paid tier above is priced for a volume this app will not approach for
 years. **Do not buy on quota.** Buy on licence and on which rate is the
 correct one.
 
+## Decision (2026-08-21)
+
+**CBE via the Apify actor, mid rate (`conversion_rate`), on Apify's free
+plan.** Omar confirmed the summary is filed in Egypt, so CBE is the
+correct source, and chose the mid side. The actor is wired as
+`ApifyCbeProvider` (`src/lib/fx/providers/apify-cbe.ts`); turning it on is
+four environment variables, in `docs/SETUP-ACCOUNTS.md`. The card question
+that shadowed this whole decision does not apply to this route — Apify's
+free plan needs none.
+
+The reasoning that led here is kept below.
+
 ## Recommendation
 
 1. **Settle mid-market vs CBE first.** If the tax summary is meant to be
    filed in Egypt, CBE is the correct rate and most of the table is
    irrelevant.
-2. **If CBE: the Apify actor is the only reachable route**, at roughly
-   the cost of a coffee per year. The obvious objection — depending on a
+2. **If CBE: the Apify actor is the only reachable route.** On the free
+   plan it costs $15/1,000 results drawn from Apify's $5/month credit —
+   and because receiptless fetches once per currency pair per date and
+   stores the result, real usage is a handful of results a month, far
+   inside that credit. (An earlier draft here quoted "$0.50–$2.50 for a
+   year"; that assumed the discounted rate and a small pull. A *bulk*
+   full-year, all-19-currencies download at the free rate would be nearer
+   $100 — but the app never does that, so the free credit is the correct
+   frame.) The obvious objection — depending on a
    community-maintained scraper — is the one risk this session already
    designed for: rates are snapshotted onto receipts, so the actor
    disappearing cannot retroactively change any figure already recorded.

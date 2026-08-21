@@ -281,13 +281,15 @@ to a licence that binds your product.
    — and look at the output. You are checking two things:
    - EGP rates are actually present for those dates, and
    - which of **buy / sell / mid** you want.
-4. **Decide buy, sell, or mid — and ask whoever files your return.** CBE
-   publishes a buy and a sell rate; the mid is a derived convenience.
-   Which one belongs on an Egyptian return is a question about Egyptian
-   tax practice, not about this codebase, and I should not guess at it.
-   Whatever you choose becomes part of the stored snapshot, so changing
-   your mind later means an explicit reprocessing run, not a silent
-   restatement.
+4. ~~Decide buy, sell, or mid.~~ **Decided: mid (`conversion_rate`),
+   2026-08-21.** CBE publishes a buy and a sell rate and the mid is the
+   midpoint; the mid is the neutral choice and is what the adapter uses
+   by default. It is part of the stored snapshot, so if your accountant
+   later says the return wants buy or sell specifically, changing it is a
+   deliberate reprocessing run (and a new policy version), never a silent
+   restatement — set `FX_CBE_RATE_SIDE` to `buy` or `sell` and re-run the
+   conversion. Worth a one-line check with whoever files the return, but
+   mid is a safe default to ship on.
 5. **Settings → Integrations → API tokens** → copy your **Personal API
    token**.
 
@@ -315,18 +317,21 @@ Set these on **Preview** too, or don't set them there at all. Either is
 fine; what matters is not putting a production token on a preview that is
 publicly reachable if you would rather it not be.
 
-## 12. Then hand back to me
+## 12. The adapter is already built
 
-Tell me:
+**Done 2026-08-21** — `src/lib/fx/providers/apify-cbe.ts`, wired into
+`configuredProvider()`. It was written against the actor's real contract,
+read from a live run: `DD/MM/YYYY` dates, one currency returning both
+directions against EGP, and the `conversion_rate` field for the mid. So
+steps 9–11 are all that is left, and step 11's four variables are the
+whole switch.
 
-- **which side you chose** (buy/sell/mid), and
-- **whether the free plan was enough** or you had to take a paid plan.
+Once they are set and a deploy goes out, `configuredProvider()` stops
+returning `null`, and every receipt currently showing "rate unavailable"
+converts the next time it is opened — capture is idempotent, and a read
+never moves a figure already recorded.
 
-Not the token. With those two facts I'll write the adapter against the
-existing `FxRateProvider` interface in `src/lib/fx/provider.ts` — a
-fetched rate is stored in `FxRate` exactly like a manual one, and the
-snapshot on the receipt is identical in shape, so nothing above the
-interface changes. Then `configuredProvider()` stops returning `null`,
-and every receipt that currently shows "rate unavailable" converts the
-next time it is opened, because capture is idempotent and reads never
-move a figure that is already recorded.
+**When you have set the variables, tell me the production URL** (not the
+token) and I will verify from outside that a foreign-currency receipt now
+converts. If anything is off, the failure is safe: an unset or wrong
+variable falls back to the exact manual-entry behaviour you have today.
