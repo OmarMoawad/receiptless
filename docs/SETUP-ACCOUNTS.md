@@ -184,3 +184,129 @@ Once the deploy is live, give me **the production URL only** — no keys, no
 connection strings. I'll run the verification script I'm writing now
 against it: `/api/health` shape, the merchant endpoint returning 404, the
 encryption-key gate, security headers, and the rollback rehearsal.
+
+---
+
+# Session 7 step 4 — the FX rate provider (your half)
+
+Added 2026-08-21, after the shortlist was checked against live terms
+(`docs/fx-provider-comparison.md`). **You answered the question that
+decides it: the tax summary is filed in Egypt, so the correct rate is the
+Central Bank of Egypt rate**, not a mid-market aggregate. That eliminates
+every commercial aggregator in the comparison and leaves one route.
+
+**Nothing here is urgent.** Manual rate entry already works end to end and
+is a permanent path. If any step below stalls, stop — nothing breaks.
+
+## 9. The card problem, which may not exist for this route
+
+The comparison concluded the blocker was a card, since every aggregator
+demanded one even for a "free" key. **The CBE route is the exception, and
+it is worth trying before spending any effort on payment.**
+
+Apify's Free plan gives **$5 of platform credit per month and explicitly
+requires no credit card to sign up.** The CBE actor is pay-per-result at
+about $11 per 1,000 results, and a **full year** of rates for all 19 CBE
+currencies is roughly 6,800 results — about **$0.50–$2.50**. That is a
+year of data inside a single month's free credit, and Receiptless needs
+far less: the snapshot design fetches once per currency pair per date.
+
+**The one thing to check, because it decides everything after it:** some
+pay-per-event actors cap free-plan users at a limited number of results
+before requiring a paid plan, and each actor states this on its own page.
+Look for it in step 10.2 before assuming the free plan is enough.
+
+**If it turns out a paid plan is required**, in order of what is most
+likely to work from Egypt:
+
+1. **PayPal.** Apify accepts PayPal for subscriptions, not only cards.
+   This is the lever worth pulling first: it is a different rail from the
+   direct card processor that refused prepaid and virtual cards at
+   Vercel, and PayPal accounts in Egypt can be funded from a local bank
+   card.
+2. **A bank-issued Egyptian Visa/Mastercard** — from CIB, NBE, Banque
+   Misr, QNB Alahli or similar. The distinction that mattered at Vercel
+   was **bank-issued versus prepaid/virtual**, not Egyptian versus not:
+   Vercel refused the prepaid and virtual cards, which have prepaid BINs.
+   A real debit or credit card on a bank BIN is a different proposition.
+   Two things usually have to be switched on explicitly, in the bank's
+   app or by phone: **online/e-commerce transactions**, and
+   **international transactions**, sometimes with a separate
+   foreign-currency limit that defaults to zero.
+3. **Do not bother with a Meeza card** — it is a domestic scheme and will
+   not clear an international charge.
+
+I can't do any of this part: creating accounts, accepting terms and
+entering payment details are yours, and I should not be the one agreeing
+to a licence that binds your product.
+
+## 10. Apify account and the CBE actor
+
+1. https://apify.com → **Sign up**. GitHub login is fine, and no card is
+   requested on the Free plan. Note the plan says **$5 free credit per
+   month** — that is the budget this whole feature runs on.
+2. Open the actor:
+   https://apify.com/maged120/central-bank-of-egypt-historical-rates
+   - Read the **Pricing** section on that page. Confirm it is
+     pay-per-result and check whether it caps free-plan users. **This is
+     the check that decides whether you need step 9's payment path.**
+   - Note that it is **community-maintained, not an official CBE
+     product.** It reads CBE's own published rates, so the data is
+     official; the tool around it is not. That risk is already designed
+     for — rates are snapshotted onto receipts, so if this actor ever
+     disappears, no recorded figure moves. New automatic conversions
+     stop, and manual entry still works.
+3. **Run it once by hand before wiring anything**, from the actor page.
+   Ask for a short range you can check — say `2026-03-01` to `2026-03-05`
+   — and look at the output. You are checking two things:
+   - EGP rates are actually present for those dates, and
+   - which of **buy / sell / mid** you want.
+4. **Decide buy, sell, or mid — and ask whoever files your return.** CBE
+   publishes a buy and a sell rate; the mid is a derived convenience.
+   Which one belongs on an Egyptian return is a question about Egyptian
+   tax practice, not about this codebase, and I should not guess at it.
+   Whatever you choose becomes part of the stored snapshot, so changing
+   your mind later means an explicit reprocessing run, not a silent
+   restatement.
+5. **Settings → Integrations → API tokens** → copy your **Personal API
+   token**.
+
+**Do not paste that token into our chat.** It goes into Vercel, below.
+
+## 11. Set the variables in Vercel
+
+Same place as step 7: Vercel → project → **Settings → Environment
+Variables**, set for **Production and Preview separately**.
+
+| Variable | Value |
+| --- | --- |
+| `FX_PROVIDER` | `apify-cbe` |
+| `APIFY_TOKEN` | your Personal API token from step 10.5 |
+| `APIFY_CBE_ACTOR` | `maged120/central-bank-of-egypt-historical-rates` |
+| `FX_CBE_RATE_SIDE` | `buy`, `sell` or `mid` — your answer from step 10.4 |
+
+`FX_PROVIDER` is the switch. Leave it unset and `configuredProvider()`
+returns `null`, which is today's behaviour: manual entry only, and the
+visible "rate unavailable" state. Nothing fails closed-off or half-wired
+because a variable is missing — the null path is the same one that runs
+when a provider simply has no rate for a day, so it stays exercised.
+
+Set these on **Preview** too, or don't set them there at all. Either is
+fine; what matters is not putting a production token on a preview that is
+publicly reachable if you would rather it not be.
+
+## 12. Then hand back to me
+
+Tell me:
+
+- **which side you chose** (buy/sell/mid), and
+- **whether the free plan was enough** or you had to take a paid plan.
+
+Not the token. With those two facts I'll write the adapter against the
+existing `FxRateProvider` interface in `src/lib/fx/provider.ts` — a
+fetched rate is stored in `FxRate` exactly like a manual one, and the
+snapshot on the receipt is identical in shape, so nothing above the
+interface changes. Then `configuredProvider()` stops returning `null`,
+and every receipt that currently shows "rate unavailable" converts the
+next time it is opened, because capture is idempotent and reads never
+move a figure that is already recorded.
