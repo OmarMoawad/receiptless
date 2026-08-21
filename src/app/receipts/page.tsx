@@ -142,6 +142,9 @@ export default async function ReceiptsPage({
           <Link href="/tax" className="text-sm text-neutral-500">
             Tax summary
           </Link>
+          <Link href="/settings" className="text-sm text-neutral-500">
+            Settings
+          </Link>
           <Link
             href="/receipts/new"
             className="rounded bg-emerald-600 text-white px-4 py-2 text-sm"
