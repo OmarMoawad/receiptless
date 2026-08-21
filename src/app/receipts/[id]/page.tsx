@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CoverageEditor } from "@/components/CoverageEditor";
+import { ExchangeRateEditor } from "@/components/ExchangeRateEditor";
 import { getCurrentUserFromCookies } from "@/lib/auth";
 import {
   describeDaysLeft,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/coverage";
 import { prisma } from "@/lib/db";
 import { formatMinorUnits } from "@/lib/money";
+import { captureConversion } from "@/lib/fx/conversion-service";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +51,14 @@ export default async function ReceiptPage({
 
   const now = new Date();
 
+  /**
+   * Session 7. Idempotent, so viewing a receipt that arrived before a
+   * rate existed picks the conversion up the moment one does — without
+   * ever re-converting one that already has a stored snapshot. Reading
+   * the page never changes a figure that is already recorded.
+   */
+  const conversion = await captureConversion(receipt.id);
+
   return (
     <main className="flex flex-col gap-5 p-6 max-w-2xl mx-auto">
       <div className="flex flex-col gap-1">
@@ -64,6 +74,66 @@ export default async function ReceiptPage({
         </p>
         {receipt.notes && <p className="text-sm">{receipt.notes}</p>}
       </div>
+
+      {/*
+        Session 7. The converted figure sits next to the original rather
+        than replacing it: the receipt is evidence of what was paid, in
+        the currency it was paid in, and the conversion is a derived
+        reading of it. Showing only the converted number would quietly
+        restate the receipt.
+      */}
+      {conversion.status === "converted" && (
+        <section className="flex flex-col gap-1 rounded border border-neutral-200 dark:border-neutral-800 p-3">
+          <div className="flex items-baseline justify-between gap-4">
+            <h2 className="text-sm font-semibold">In {conversion.snapshot.targetCurrency}</h2>
+            <p className="font-mono">
+              {formatMinorUnits(
+                conversion.snapshot.totalTargetMinor,
+                conversion.snapshot.targetCurrency,
+              )}
+            </p>
+          </div>
+          <p className="text-xs text-neutral-500">
+            At {conversion.snapshot.rate} {conversion.snapshot.targetCurrency} per 1{" "}
+            {conversion.snapshot.sourceCurrency}, the rate on file for{" "}
+            {formatCoverageDate(conversion.snapshot.rateEffectiveDate)} (
+            {conversion.snapshot.rateSource})
+            {conversion.snapshot.version > 1 && ` · version ${conversion.snapshot.version}`}.
+            Stored when this receipt was saved — never recalculated at today&rsquo;s rate.
+          </p>
+          <details className="text-xs text-neutral-500">
+            <summary className="cursor-pointer">Correct this rate</summary>
+            <div className="pt-2">
+              <ExchangeRateEditor
+                receiptId={receipt.id}
+                sourceCurrency={conversion.snapshot.sourceCurrency}
+                targetCurrency={conversion.snapshot.targetCurrency}
+                purchasedOn={formatCoverageDate(receipt.purchasedAt)}
+                currentRate={conversion.snapshot.rate}
+              />
+            </div>
+          </details>
+        </section>
+      )}
+
+      {/*
+        Step 3's visible unavailable state. Say the number is not known
+        rather than substituting today's rate for it.
+      */}
+      {conversion.status === "unavailable" && conversion.targetCurrency && (
+        <section className="flex flex-col gap-2 rounded border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 p-3">
+          <h2 className="text-sm font-semibold text-amber-800 dark:text-amber-400">
+            Value in {conversion.targetCurrency} is not known
+          </h2>
+          <p className="text-xs text-amber-800 dark:text-amber-400">{conversion.reason}</p>
+          <ExchangeRateEditor
+            receiptId={receipt.id}
+            sourceCurrency={conversion.sourceCurrency}
+            targetCurrency={conversion.targetCurrency}
+            purchasedOn={formatCoverageDate(receipt.purchasedAt)}
+          />
+        </section>
+      )}
 
       {receipt.items.length > 0 && (
         <section className="flex flex-col gap-2">

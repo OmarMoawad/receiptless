@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { classifyForOwner } from "@/lib/classify-receipt";
+import { captureConversionQuietly } from "@/lib/fx/conversion-service";
 
 function findWithRelations(id: string) {
   return prisma.receipt.findUnique({
@@ -113,6 +114,11 @@ export async function resolveClaim(token: string, userId: string | null): Promis
    * trade a real ownership guarantee for a cosmetic one.
    */
   await classifyClaimedReceipt(receipt.id, userId);
+
+  // Session 7, and for the same reason as the classification above: a
+  // merchant-issued receipt has no owner when it is created, so it has no
+  // reporting currency to convert into until the claim gives it one.
+  await captureConversionQuietly(receipt.id);
 
   const claimed = await findWithRelations(receipt.id);
   if (!claimed) return { status: "not_found" };

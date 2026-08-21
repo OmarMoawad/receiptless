@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { createReceiptSchema } from "@/lib/validation";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { classifyForOwner } from "@/lib/classify-receipt";
+import { captureConversionQuietly } from "@/lib/fx/conversion-service";
 
 /**
  * Session 3 (RECEIPTLESS_STATE.md): every receipt-facing route requires a
@@ -99,6 +100,10 @@ export async function POST(request: NextRequest) {
     },
     include: { merchant: true, items: true },
   });
+
+  // Session 7: the rate is captured now, at ingest, and stored on the
+  // receipt — not looked up later when a report happens to be opened.
+  await captureConversionQuietly(receipt.id);
 
   return NextResponse.json(receipt, { status: 201 });
 }

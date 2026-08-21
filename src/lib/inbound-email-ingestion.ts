@@ -1,6 +1,7 @@
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
 import { classifyForOwner } from "./classify-receipt";
+import { captureConversionQuietly } from "./fx/conversion-service";
 import { parseEmailReceipt } from "./email-receipt-parser";
 import type { InboundEmail } from "./inbound-email";
 
@@ -211,12 +212,21 @@ async function applyParsedReceipt(
 
 export async function ingestEmailForUser(userId: string, email: InboundEmail): Promise<InboundEmailIngestionResult> {
   try {
-    return await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const delivery = await tx.inboundEmailDelivery.create({
         data: { provider: email.provider, providerMessageId: email.providerMessageId, userId },
       });
       return await applyParsedReceipt(tx, userId, delivery.id, email);
     });
+
+    // Session 7. Deliberately *after* the transaction rather than inside
+    // it: the conversion reads and writes its own rows, and holding the
+    // ingestion transaction open across it would widen the window on the
+    // one write path that has no UI to retry from. A receipt whose
+    // conversion is missing shows the unavailable state; a receipt lost
+    // to a rolled-back transaction is gone.
+    if (result.status === "created") await captureConversionQuietly(result.receiptId);
+    return result;
   } catch (error) {
     if (isUniqueConflict(error)) return { status: "duplicate" };
     throw error;

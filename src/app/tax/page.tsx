@@ -81,13 +81,35 @@ export default async function TaxPage({
         Take it to whoever files your return.
       </p>
 
-      {summary.mixedCurrencies.length > 0 && (
-        <p className="rounded border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 p-3 text-xs text-amber-800 dark:text-amber-400">
-          This year mixes {summary.mixedCurrencies.join(", ")}. Totals are shown in{" "}
-          {summary.currency} and are <strong>not converted</strong> — historical
-          exchange rates are a later session, and converting at today&apos;s rate
-          would be a confident wrong number.
-        </p>
+      {/*
+        Session 7. This used to say mixed currencies were not converted at
+        all. They are now — at the rate stored on each receipt when it was
+        ingested, never at today's rate. What remains is the honest
+        remainder: receipts with no rate on file are named here rather
+        than folded into the total, because a total that quietly excludes
+        them is worse than one that says what it is missing.
+      */}
+      {summary.unconverted.length > 0 && (
+        <div className="rounded border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 p-3 text-xs text-amber-800 dark:text-amber-400 space-y-2">
+          <p>
+            <strong>Not included in the totals below.</strong> These receipts have
+            no exchange rate on file for the day they were bought, so their value
+            in {summary.currency} is not known. Converting them at today&apos;s
+            rate would be a confident wrong number in your return.
+          </p>
+          <ul className="space-y-1">
+            {summary.unconverted.map((line) => (
+              <li key={line.currency}>
+                {line.receiptCount} receipt{line.receiptCount === 1 ? "" : "s"}{" "}
+                totalling {formatMinorUnits(line.totalMinor, line.currency)}
+              </li>
+            ))}
+          </ul>
+          <p>
+            Open a receipt to enter the rate your bank charged. It is stored
+            against that receipt permanently, so the figure never moves again.
+          </p>
+        </div>
       )}
 
       {summary.lines.length === 0 ? (

@@ -171,6 +171,32 @@ export async function captureConversion(receiptId: string): Promise<ConversionSt
 }
 
 /**
+ * `captureConversion` for the ingestion paths, where a conversion failing
+ * must never cost someone their receipt.
+ *
+ * The distinction is deliberate. A missing rate is already a normal
+ * return value, not an exception — that is step 3's whole design. What
+ * this swallows is the genuinely unexpected: a database error, a currency
+ * table that has lost an entry a stored receipt still uses. In every such
+ * case the receipt is saved and simply shows the unavailable state, which
+ * is recoverable at any time by entering a rate. Failing the import
+ * instead would lose the receipt over a number that was never required
+ * for the receipt to be worth keeping.
+ *
+ * Same reasoning as the claim path's classification step: the ownership
+ * guarantee is real, the derived value is a convenience, and folding the
+ * convenience into the guarantee trades the first for the second.
+ */
+export async function captureConversionQuietly(receiptId: string): Promise<ConversionState | null> {
+  try {
+    return await captureConversion(receiptId);
+  } catch (error) {
+    console.error("[fx] could not capture a conversion for receipt", receiptId, error);
+    return null;
+  }
+}
+
+/**
  * The explicit, authorised reprocessing operation.
  *
  * Deliberately not automatic and deliberately not an update. It creates a
