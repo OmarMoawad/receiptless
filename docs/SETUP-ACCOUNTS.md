@@ -1,12 +1,32 @@
-# Session 10 Part B — your half
+# Account setup — your half
 
-Everything here needs an account, a card, or a consent screen, so it has to
-be you. I can't create accounts, accept terms, or type credentials — and
-you should not paste any secret from these steps into our chat. They go
-straight into Vercel's environment-variable UI or your `.env`, never here.
+This file collects the steps only you can do: they need an account, a
+card, or a consent screen. I can't create accounts, accept terms, or type
+credentials — and you should not paste any secret from these steps into
+our chat. They go straight into Vercel's environment-variable UI or your
+`.env`, never here.
 
-Work top to bottom; each step's output feeds the next. Tell me when a step
-is done and I'll verify what's verifiable from outside.
+> ## Status — read this before working through anything
+>
+> **Sections 1–8 (Session 10 Part B) are DONE, 2026-08-15.** Production is
+> live at https://receiptless-theta.vercel.app with 12/12 automated checks
+> and a rollback rehearsed at 42s. Neon, Cloudflare R2, Vercel, Google
+> OAuth and Sentry are all set up, and a real Gmail account has since
+> imported real receipts. **Do not work through 1–8 again** — they are
+> kept as the record of how production was built, and because a rebuild
+> or a second environment would follow the same steps.
+>
+> **Section 9 onwards is the only outstanding work**, and even that is
+> optional: it wires an automatic FX rate source, and manual rate entry
+> already works end to end without it.
+>
+> Each section is dated. When a new one is added, say plainly here
+> whether it is done, so this file never again reads as though all of it
+> is outstanding.
+
+Within a section, work top to bottom; each step's output feeds the next.
+Tell me when a step is done and I'll verify what's verifiable from
+outside.
 
 ---
 
