@@ -1,28 +1,24 @@
+import { ApifyCbeProvider } from "./providers/apify-cbe";
+
 /**
  * Phase 2 session 7, step 4 — the seam a rate provider plugs into.
  *
- * **No provider is configured, and that is the current state of the
- * session rather than an oversight.** Steps 1–3 (the rate table, manual
- * entry, and a visible unavailable state) are built and work end to end
- * with no third party at all. Choosing a provider is step 4 and it
- * **needs Omar**, because it is a licensing decision rather than an
- * engineering one.
+ * **The Central Bank of Egypt provider is wired (2026-08-21), and it is
+ * off unless configured.** The decision that chose it was EGP: the natural
+ * free choice, Frankfurter, is ECB-backed and excludes EGP, which is the
+ * currency this app most needs. The shortlist of providers with EGP
+ * *history* mostly forbid commercial use or withhold history on their free
+ * tiers — so the route that survived is CBE's own published rates, read
+ * through an Apify actor, on Apify's free plan. See
+ * `docs/fx-provider-comparison.md` for the comparison and
+ * `docs/SETUP-ACCOUNTS.md` for how it is turned on.
  *
- * **What decides it is EGP, and it eliminates the obvious answer.** The
- * natural free choice is Frankfurter — ECB-backed, no API key, no signup
- * and no card, which matters because Vercel already rejected the prepaid
- * and virtual cards reachable from Egypt. But the ECB's reference rates
- * **do not include EGP**, which is the currency this app most needs. So
- * the shortlist is providers with EGP *history*, where free tiers
- * typically either forbid commercial use or withhold historical data.
- *
- * Do not pick one from memory when the time comes: terms and pricing move,
- * and the shortlist has to be checked against current terms for EGP
- * historical coverage and commercial use at the moment of choosing.
- *
- * When a provider does land, it implements this interface and nothing
- * above it changes — a fetched rate is stored in `FxRate` exactly like a
- * manual one, and the snapshot on the receipt is identical in shape.
+ * A provider implements the interface below and nothing above it changes —
+ * a fetched rate is stored in `FxRate` exactly like a manual one, and the
+ * snapshot on the receipt is identical in shape. `configuredProvider()`
+ * returns null when nothing is set, which is manual-entry-only and the
+ * same code path a configured provider takes when it has no rate for a
+ * given day.
  */
 
 export type FxRateQuote = {
@@ -47,13 +43,35 @@ export const MANUAL_SOURCE = "manual";
 export const MANUAL_POLICY_VERSION = "manual-entry@1";
 
 /**
- * The configured provider, or null while step 4 is outstanding.
+ * The configured provider, or null when none is set.
  *
- * Deliberately a function rather than a constant so that adding a provider
- * is one edit here, and so that every caller already handles null — which
- * is the same code path as "this provider has no rate for that day", and
- * therefore a path that stays exercised rather than rotting.
+ * `FX_PROVIDER` is the switch. Unset — the default, and the state in every
+ * test and in local dev — returns null, which is manual-entry-only and the
+ * *same* code path that runs when a configured provider simply has no rate
+ * for a day. So the null path stays exercised rather than rotting, and a
+ * half-set configuration fails to null rather than half-working.
+ *
+ * The only wired provider is the Central Bank of Egypt one (session 7 step
+ * 4). It reads its actor and rate-side from the environment so that
+ * switching either is a config change, not a deploy of new code — and the
+ * side travels into `policyVersion`, so a change from mid to buy/sell is a
+ * new version rather than a silent restatement of stored rates.
  */
 export function configuredProvider(): FxRateProvider | null {
-  return null;
+  if (process.env.FX_PROVIDER !== "apify-cbe") return null;
+
+  const token = process.env.APIFY_TOKEN?.trim();
+  if (!token) return null;
+
+  const side = normaliseSide(process.env.FX_CBE_RATE_SIDE);
+  const actor = process.env.APIFY_CBE_ACTOR?.trim() || undefined;
+
+  return new ApifyCbeProvider({ token, actor, side });
+}
+
+function normaliseSide(value: string | undefined): "buy" | "sell" | "mid" {
+  const side = value?.trim().toLowerCase();
+  if (side === "buy" || side === "sell") return side;
+  // Default to mid — Omar's choice on 2026-08-21, and the neutral one.
+  return "mid";
 }

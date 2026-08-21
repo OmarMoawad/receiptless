@@ -1,0 +1,176 @@
+import { describe, expect, it, vi } from "vitest";
+import { parseRate } from "../convert";
+import {
+  ApifyCbeProvider,
+  cbeRateToCanonicalString,
+  fromCbeDate,
+  quoteFromRows,
+  toCbeDate,
+  type CbeRow,
+} from "./apify-cbe";
+
+/**
+ * The real payload, captured from a live actor run on 2026-08-21 for
+ * 1–5 March 2026 with currencies USD and EUR. Kept verbatim — including
+ * the numbers as JSON doubles — so these tests exercise the exact shape
+ * and precision the provider has to survive, not a tidied-up version of it.
+ */
+const SAMPLE: CbeRow[] = [
+  {
+    date: "05/03/2026",
+    base: "USD",
+    base_name: "US Dollar",
+    target: "EGP",
+    target_name: "Egyptian Pound",
+    buy: 50.0887,
+    sell: 50.2271,
+    conversion_rate: 50.1579,
+  },
+  {
+    date: "05/03/2026",
+    base: "EGP",
+    base_name: "Egyptian Pound",
+    target: "USD",
+    target_name: "US Dollar",
+    buy: 0.0199,
+    sell: 0.02,
+    conversion_rate: 0.0199,
+  },
+];
+
+describe("CBE date format", () => {
+  it("writes the DD/MM/YYYY the actor expects, in UTC", () => {
+    expect(toCbeDate(new Date(Date.UTC(2026, 2, 5)))).toBe("05/03/2026");
+    expect(toCbeDate(new Date(Date.UTC(2026, 0, 1)))).toBe("01/01/2026");
+  });
+
+  it("reads it back, and rejects an impossible date rather than rolling over", () => {
+    expect(fromCbeDate("05/03/2026")?.toISOString()).toBe("2026-03-05T00:00:00.000Z");
+    // 31 February must not silently become 2 or 3 March.
+    expect(fromCbeDate("31/02/2026")).toBeNull();
+    expect(fromCbeDate("2026-03-05")).toBeNull();
+    expect(fromCbeDate("garbage")).toBeNull();
+  });
+});
+
+describe("bridging a JSON double to a canonical rate string", () => {
+  it("reproduces CBE's published precision exactly", () => {
+    // These are the values that would otherwise arrive as doubles. Each
+    // must come back as the exact text CBE published, and must pass the
+    // canonical-decimal validator the rest of the system enforces.
+    for (const [value, expected] of [
+      [50.1579, "50.1579"],
+      [0.0199, "0.0199"],
+      [0.02, "0.02"],
+      [50.2271, "50.2271"],
+    ] as const) {
+      const text = cbeRateToCanonicalString(value);
+      expect(text).toBe(expected);
+      // Not merely equal-looking: actually accepted as a canonical rate.
+      expect(parseRate(text!).text).toBe(expected);
+    }
+  });
+
+  it("refuses a value it cannot represent, rather than guessing", () => {
+    expect(cbeRateToCanonicalString(undefined)).toBeNull();
+    expect(cbeRateToCanonicalString(0)).toBeNull();
+    expect(cbeRateToCanonicalString(-1)).toBeNull();
+    expect(cbeRateToCanonicalString(Number.NaN)).toBeNull();
+    // A magnitude that serialises in exponential form is outside CBE's
+    // range and is refused so it can never become a wrong rate.
+    expect(cbeRateToCanonicalString(1e-7)).toBeNull();
+  });
+});
+
+describe("picking the row for a pair", () => {
+  it("reads the mid rate for the requested direction", () => {
+    const quote = quoteFromRows(SAMPLE, "EGP", "USD", "mid");
+    expect(quote?.rate).toBe("0.0199");
+    expect(quote?.effectiveDate.toISOString()).toBe("2026-03-05T00:00:00.000Z");
+    expect(quote?.providerReference).toBe("cbe:05/03/2026:EGP/USD:mid");
+  });
+
+  it("reads the other direction from the same payload", () => {
+    // Requesting one currency returns both directions, so USD->EGP is
+    // present in the very same response as EGP->USD.
+    expect(quoteFromRows(SAMPLE, "USD", "EGP", "mid")?.rate).toBe("50.1579");
+  });
+
+  it("honours the chosen side", () => {
+    expect(quoteFromRows(SAMPLE, "USD", "EGP", "buy")?.rate).toBe("50.0887");
+    expect(quoteFromRows(SAMPLE, "USD", "EGP", "sell")?.rate).toBe("50.2271");
+    expect(quoteFromRows(SAMPLE, "USD", "EGP", "mid")?.rate).toBe("50.1579");
+  });
+
+  it("returns null for a pair the payload does not contain", () => {
+    expect(quoteFromRows(SAMPLE, "EUR", "USD", "mid")).toBeNull();
+  });
+});
+
+describe("ApifyCbeProvider.fetchRate", () => {
+  function fakeFetch(rows: CbeRow[], capture?: (url: string, body: unknown) => void) {
+    return vi.fn(async (url: string, init: RequestInit) => {
+      capture?.(url, JSON.parse(String(init.body)));
+      return new Response(JSON.stringify(rows), { status: 200 });
+    });
+  }
+
+  it("requests a single day and the non-EGP currency, then returns the mid", async () => {
+    let sentUrl = "";
+    let sentBody: Record<string, unknown> = {};
+    const provider = new ApifyCbeProvider({
+      token: "tok",
+      side: "mid",
+      fetchImpl: fakeFetch(SAMPLE, (url, body) => {
+        sentUrl = url;
+        sentBody = body as Record<string, unknown>;
+      }),
+    });
+
+    const quote = await provider.fetchRate("EGP", "USD", new Date(Date.UTC(2026, 2, 5)));
+
+    expect(quote?.rate).toBe("0.0199");
+    // Requested the non-EGP side, a single day, mid only, no cross rates.
+    expect(sentBody.currencies).toEqual(["USD"]);
+    expect(sentBody.fromDate).toBe("05/03/2026");
+    expect(sentBody.toDate).toBe("05/03/2026");
+    expect(sentBody.includeConversionRate).toBe(true);
+    expect(sentBody.includeBuySell).toBe(false);
+    expect(sentBody.includeCrossRates).toBe(false);
+    // Token is in the query string, and the actor id uses the API's ~ form.
+    expect(sentUrl).toContain("central-bank-of-egypt-historical-rates");
+    expect(sentUrl).toContain("token=tok");
+  });
+
+  it("puts the side into the policy version so a change is a new version", () => {
+    expect(new ApifyCbeProvider({ token: "t", side: "mid" }).policyVersion).toBe("cbe-mid@1");
+    expect(new ApifyCbeProvider({ token: "t", side: "buy" }).policyVersion).toBe("cbe-buy@1");
+  });
+
+  it("asks for cross rates only when neither side is EGP", async () => {
+    let sentBody: Record<string, unknown> = {};
+    const provider = new ApifyCbeProvider({
+      token: "t",
+      fetchImpl: fakeFetch([], (_url, body) => {
+        sentBody = body as Record<string, unknown>;
+      }),
+    });
+
+    await provider.fetchRate("EUR", "USD", new Date(Date.UTC(2026, 2, 5)));
+    expect(sentBody.includeCrossRates).toBe(true);
+    expect(sentBody.currencies).toEqual(["EUR", "USD"]);
+  });
+
+  it("returns null when the actor has no row for the pair", async () => {
+    const provider = new ApifyCbeProvider({ token: "t", fetchImpl: fakeFetch([]) });
+    expect(await provider.fetchRate("EGP", "USD", new Date(Date.UTC(2026, 2, 5)))).toBeNull();
+  });
+
+  it("throws on a non-OK response rather than inventing a rate", async () => {
+    const provider = new ApifyCbeProvider({
+      token: "t",
+      fetchImpl: vi.fn(async () => new Response("nope", { status: 429, statusText: "Too Many Requests" })),
+    });
+    await expect(provider.fetchRate("EGP", "USD", new Date(Date.UTC(2026, 2, 5)))).rejects.toThrow(/429/);
+  });
+});
