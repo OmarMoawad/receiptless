@@ -158,6 +158,36 @@ date. That's a bug in this file, not a documentation nicety.
 > receipt is identical in shape. Nothing is blocked in the meantime;
 > manual entry is a permanent path, not a stopgap.
 >
+> **The provider shortlist was checked against current terms on
+> 2026-08-21 — see `docs/fx-provider-comparison.md`.** Three things came
+> out of it that change the shape of the decision:
+>
+> 1. **The real question is mid-market rate vs Central Bank of Egypt
+>    rate, not which aggregator.** They are different numbers, and EGP is
+>    where they diverge most. An Egyptian accountant filing a return
+>    expects the CBE rate; a mid-market aggregate answers a different
+>    question. Settling this eliminates most of the shortlist on its own.
+> 2. **CBE has no public API and blocks scrapers.** A request to its
+>    rates page returns "The requested URL was rejected" — there is a WAF
+>    in front of it, so a serverless function would be blocked the same
+>    way. The only reachable route to official CBE rates is a
+>    community-maintained Apify actor at roughly **$0.50–$2.50 per year**
+>    of rates. The obvious objection to depending on it is the risk this
+>    session already designed for: rates are snapshotted onto receipts,
+>    so the actor disappearing cannot change any figure already recorded.
+> 3. **The blocker is the card, not the price.** Every viable option
+>    needs one, *including the free tiers* — exchangerate.host requires a
+>    card to issue a free key, and its free plan has **no HTTPS**, which
+>    disqualifies it outright. CurrencyAPI's free tier is explicitly
+>    "Private Use". This is the same wall Vercel Pro hit, and the two
+>    deferrals should be resolved together rather than separately, since
+>    both turn on whether Receiptless takes payment.
+>
+> Volume is not a factor and should not drive the choice: the snapshot
+> design calls a provider **once per currency pair per date**, so real
+> usage is tens of requests a month. Every paid tier is sized for a
+> volume this app will not approach for years.
+>
 > **What actually decides the provider is EGP, and it eliminates the
 > obvious answer.** The natural free choice is Frankfurter — ECB-backed,
 > no API key, no signup and no card, which matters because Vercel already
