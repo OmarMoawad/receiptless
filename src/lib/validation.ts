@@ -109,3 +109,25 @@ export const receiptItemCreateSchema = z.object({
   warrantyMonths: coverageShape.warrantyMonths.nullable().optional(),
   returnWindowDays: coverageShape.returnWindowDays.nullable().optional(),
 });
+
+/**
+ * Session 6: a category rule a person writes for themselves.
+ *
+ * `pattern` has a floor of two characters because a one-character
+ * substring matches most merchant names — a rule that fires on
+ * everything is not a rule, and the failure is silent: it quietly
+ * recategorises a whole vault. The ceiling is generous; the floor is the
+ * one doing work.
+ */
+export const RULE_TARGETS = ["MERCHANT", "ITEM"] as const;
+
+export const categoryRuleInputSchema = z.object({
+  pattern: z.string().trim().min(2).max(120),
+  category: categorySchema,
+  target: z.enum(RULE_TARGETS),
+  // Owner rules sit below DEFAULT_RULES' 1000 so a new rule outranks the
+  // built-ins by default, without anyone needing to know that number.
+  priority: z.number().int().min(0).max(999).default(100),
+});
+
+export type CategoryRuleInput = z.infer<typeof categoryRuleInputSchema>;

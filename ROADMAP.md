@@ -162,7 +162,8 @@ choices) vs. what's solo-buildable right now. This bullet list is the
   not a reason on its own.
 - Real search (full-text, eventually semantic) across merchants, items, notes
 - Warranty/return views surfaced in the UI, not just stored in the schema
-- CSV/PDF export, tax-category tagging, multi-currency with historical FX
+- ~~CSV/PDF export~~ (session 5), ~~tax-category tagging~~ (session 6),
+  multi-currency with historical FX (session 7 — needs an FX rate source)
 
 ## Phase 3 — Merchant API / SDK (Months 3–5)
 
