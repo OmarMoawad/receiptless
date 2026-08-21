@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CATEGORIES } from "@/lib/categories";
+import { isKnownCurrency } from "@/lib/fx/currency-metadata";
 
 const SOURCES = [
   "QR",
@@ -131,3 +132,27 @@ export const categoryRuleInputSchema = z.object({
 });
 
 export type CategoryRuleInput = z.infer<typeof categoryRuleInputSchema>;
+
+/**
+ * Session 7: the currency a person's reports are expressed in.
+ *
+ * It must be a currency whose minor-unit scale is known, because every
+ * conversion targets it — accepting one the system cannot scale would let
+ * a receipt be converted into a currency it cannot then format or sum
+ * correctly. `isKnownCurrency` is the same gate the conversion path uses,
+ * so the setting can never name a target the converter would later
+ * reject. Validated *after* upper-casing, so `egp` and `EGP` are one
+ * thing.
+ */
+export const reportingCurrencySchema = z
+  .string()
+  .trim()
+  .length(3)
+  .transform((v) => v.toUpperCase())
+  .refine(isKnownCurrency, { message: "Unsupported currency for reporting." });
+
+export const reportingCurrencyInputSchema = z.object({
+  reportingCurrency: reportingCurrencySchema,
+});
+
+export type ReportingCurrencyInput = z.infer<typeof reportingCurrencyInputSchema>;
