@@ -60,6 +60,7 @@ model User {
   inboundEmailAddress InboundEmailAddress?
   inboundEmailDeliveries InboundEmailDelivery[]
   emailConnections EmailConnection[]
+  categoryRules CategoryRule[]
 }
 
 model InboundEmailAddress {
@@ -297,4 +298,40 @@ model RateLimitCounter {
   @@id([bucket, subject])
   // Supports the periodic prune, which deletes by age across all buckets.
   @@index([windowStart])
+}
+
+// Session 6. A person's own classification rules, which always beat the
+// built-in defaults in src/lib/categories.ts — a default that is wrong for
+// someone's spending should be overridden, not argued with.
+//
+// `pattern` is matched as a normalised substring, never as a regular
+// expression: a user-authored regex is a denial-of-service vector
+// evaluated over every item of every receipt, and "why did this rule
+// fire?" should be answerable by reading the rule. See categories.ts.
+model CategoryRule {
+  id      String @id @default(cuid())
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  ownerId String
+
+  pattern  String
+  category Category
+  target   RuleTarget
+
+  // Lower runs first. Owner rules default below DEFAULT_RULES' 1000 so a
+  // new rule outranks the built-ins without anyone having to know that.
+  priority Int @default(100)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // One rule per pattern per target per owner: re-adding a pattern should
+  // edit the rule that exists rather than create a second one that can
+  // never fire.
+  @@unique([ownerId, target, pattern])
+  @@index([ownerId])
+}
+
+enum RuleTarget {
+  MERCHANT
+  ITEM
 }

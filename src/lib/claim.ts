@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { classifyForOwner } from "@/lib/classify-receipt";
 
 function findWithRelations(id: string) {
   return prisma.receipt.findUnique({
@@ -99,7 +100,50 @@ export async function resolveClaim(token: string, userId: string | null): Promis
     return { status: "already_claimed" };
   }
 
+  /**
+   * Session 6. A merchant-issued receipt has no owner when it is created,
+   * so there are no rules to classify it with until this moment — the
+   * claim is the first point at which "whose categories?" has an answer.
+   *
+   * Deliberately after the guarded update rather than inside it. That
+   * update is the atomicity guarantee for the whole claim protocol (see
+   * above), and classification is a convenience: if it fails, the receipt
+   * is still correctly claimed and still correctly owned, just filed
+   * under the category it arrived with. Folding it into the guard would
+   * trade a real ownership guarantee for a cosmetic one.
+   */
+  await classifyClaimedReceipt(receipt.id, userId);
+
   const claimed = await findWithRelations(receipt.id);
   if (!claimed) return { status: "not_found" };
   return { status: "claimed", receipt: claimed };
+}
+
+async function classifyClaimedReceipt(receiptId: string, ownerId: string): Promise<void> {
+  const receipt = await prisma.receipt.findUnique({
+    where: { id: receiptId },
+    include: { merchant: true, items: true },
+  });
+  if (!receipt) return;
+
+  const classified = await classifyForOwner(ownerId, {
+    merchantName: receipt.merchant.name,
+    category: receipt.category,
+    items: receipt.items,
+  });
+
+  const itemUpdates = receipt.items
+    .map((item, index) => ({ item, category: classified.items[index] }))
+    .filter(({ item, category }) => category !== item.category);
+
+  if (classified.category === receipt.category && itemUpdates.length === 0) return;
+
+  await prisma.$transaction([
+    ...(classified.category === receipt.category
+      ? []
+      : [prisma.receipt.update({ where: { id: receiptId }, data: { category: classified.category } })]),
+    ...itemUpdates.map(({ item, category }) =>
+      prisma.receiptItem.update({ where: { id: item.id }, data: { category } }),
+    ),
+  ]);
 }

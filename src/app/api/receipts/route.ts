@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { createReceiptSchema } from "@/lib/validation";
 import { enforceRateLimit } from "@/lib/rate-limit";
+import { classifyForOwner } from "@/lib/classify-receipt";
 
 /**
  * Session 3 (RECEIPTLESS_STATE.md): every receipt-facing route requires a
@@ -64,6 +65,18 @@ export async function POST(request: NextRequest) {
     create: { name: data.merchant },
   });
 
+  /**
+   * Session 6: the rules layer fills in what the caller left as OTHER,
+   * for the receipt and for every item. It never overwrites a category
+   * that was chosen — see classify-receipt.ts for why OTHER is read as
+   * "no opinion" rather than as a choice.
+   */
+  const classified = await classifyForOwner(user.userId, {
+    merchantName: data.merchant,
+    category: data.category,
+    items: data.items,
+  });
+
   const receipt = await prisma.receipt.create({
     data: {
       ownerId: user.userId,
@@ -74,14 +87,14 @@ export async function POST(request: NextRequest) {
       taxMinor: data.taxMinor,
       discountMinor: data.discountMinor,
       feeMinor: data.feeMinor,
-      category: data.category,
+      category: classified.category,
       purchasedAt: new Date(data.purchasedAt),
       source: data.source,
       verification: "UNVERIFIED",
       rawPayload: data.rawPayload,
       notes: data.notes,
       items: data.items
-        ? { create: data.items }
+        ? { create: data.items.map((item, index) => ({ ...item, category: classified.items[index] })) }
         : undefined,
     },
     include: { merchant: true, items: true },

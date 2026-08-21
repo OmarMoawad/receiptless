@@ -139,6 +139,9 @@ export default async function ReceiptsPage({
           <Link href="/coverage" className="text-sm text-neutral-500">
             Warranties and returns
           </Link>
+          <Link href="/tax" className="text-sm text-neutral-500">
+            Tax summary
+          </Link>
           <Link
             href="/receipts/new"
             className="rounded bg-emerald-600 text-white px-4 py-2 text-sm"

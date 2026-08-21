@@ -83,3 +83,66 @@ describe("ingestInboundEmail", () => {
     expect(receipt?.purchasedAt).toEqual(receivedAt);
   });
 });
+
+/**
+ * Session 6. This path is the reason the rules layer exists. There is no
+ * UI here and therefore nobody to pick a category, so before this every
+ * emailed receipt landed on the schema default and stayed there — the
+ * tax summary's biggest blind spot was its most automatic source of data.
+ */
+describe("emailed receipts are classified on the way in", () => {
+  it("applies an owner rule to a merchant no default recognises", async () => {
+    const user = await registerTestUser();
+    const mailboxToken = randomUUID();
+    await prisma.inboundEmailAddress.create({ data: { userId: user.userId, mailboxToken } });
+    await prisma.categoryRule.create({
+      data: { ownerId: user.userId, pattern: "immutable", category: "TRAVEL", target: "MERCHANT" },
+    });
+
+    const result = await ingestInboundEmail(email(mailboxToken));
+    expect(result.status).toBe("created");
+
+    const receipt = await prisma.receipt.findFirst({
+      where: { ownerId: user.userId },
+      orderBy: { createdAt: "desc" },
+      include: { items: true },
+    });
+    expect(receipt?.category).toBe("TRAVEL");
+    // The item inherits the receipt rather than dropping to OTHER, so one
+    // purchase does not get split across two categories.
+    expect(receipt?.items.every((item) => item.category === "TRAVEL")).toBe(true);
+  });
+
+  it("leaves a receipt on OTHER when no rule has an opinion", async () => {
+    const user = await registerTestUser();
+    const mailboxToken = randomUUID();
+    await prisma.inboundEmailAddress.create({ data: { userId: user.userId, mailboxToken } });
+
+    const result = await ingestInboundEmail(email(mailboxToken));
+    expect(result.status).toBe("created");
+
+    const receipt = await prisma.receipt.findFirst({
+      where: { ownerId: user.userId },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(receipt?.category).toBe("OTHER");
+  });
+
+  it("does not apply another owner's rules", async () => {
+    const user = await registerTestUser();
+    const stranger = await registerTestUser();
+    const mailboxToken = randomUUID();
+    await prisma.inboundEmailAddress.create({ data: { userId: user.userId, mailboxToken } });
+    await prisma.categoryRule.create({
+      data: { ownerId: stranger.userId, pattern: "immutable", category: "HEALTH", target: "MERCHANT" },
+    });
+
+    await ingestInboundEmail(email(mailboxToken));
+
+    const receipt = await prisma.receipt.findFirst({
+      where: { ownerId: user.userId },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(receipt?.category).toBe("OTHER");
+  });
+});

@@ -1,5 +1,6 @@
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
+import { classifyForOwner } from "./classify-receipt";
 import { parseEmailReceipt } from "./email-receipt-parser";
 import type { InboundEmail } from "./inbound-email";
 
@@ -159,6 +160,22 @@ async function applyParsedReceipt(
     update: {},
     create: { name: parsed.merchant },
   });
+  /**
+   * Session 6. This path has no UI and therefore no one to pick a
+   * category, so before the rules layer every emailed receipt landed on
+   * the schema default and stayed there — the tax summary's largest
+   * blind spot was its most automatic source of data.
+   */
+  const classified = await classifyForOwner(
+    userId,
+    {
+      merchantName: parsed.merchant,
+      category: "OTHER",
+      items: parsed.items,
+    },
+    tx,
+  );
+
   const receipt = await tx.receipt.create({
     data: {
       ownerId: userId,
@@ -166,10 +183,13 @@ async function applyParsedReceipt(
       currency: parsed.currency,
       totalMinor: parsed.totalMinor,
       purchasedAt: parsed.purchasedAt,
+      category: classified.category,
       source: "EMAIL",
       verification: "IMPORTED",
       rawPayload: email.text,
-      items: parsed.items.length ? { create: parsed.items } : undefined,
+      items: parsed.items.length
+        ? { create: parsed.items.map((item, index) => ({ ...item, category: classified.items[index] })) }
+        : undefined,
     },
   });
   await tx.inboundEmailDelivery.update({
