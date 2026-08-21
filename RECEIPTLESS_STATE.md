@@ -10,10 +10,19 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-> **Next action: Phase 2 session 6 — tax-category tagging.** Add
-> per-receipt and per-item categories plus a rules layer, then feed those
-> classifications into an exportable tax summary. Build on
-> `src/lib/categories.ts`. Needs nothing from anyone.
+> **Next action: Phase 2 session 7 — multi-currency with historical FX.**
+> Store the rate used at purchase time; never convert on read with today's
+> rate. **Needs Omar**: an FX rate source — most free tiers forbid
+> commercial use, the same licensing trap logged below for the Surya OCR
+> weights. Session 6 left a visible placeholder for exactly this: the tax
+> summary refuses to add currencies together and says so on the page and
+> in the CSV.
+>
+> **Session 6 (tax-category tagging) is done, 2026-08-21.** A rules layer
+> classifies receipts and line items on the way in, on every ingestion
+> path including the ones with no UI; `/tax` totals a year by category and
+> exports it. Full detail under "Completed components (Phase 2 session
+> 6)" below.
 >
 > **Session 5 (CSV and PDF export) is done, 2026-08-20.** Both exports are
 > authenticated, owner-scoped, batched, and streamed. CSV is an analysis-
@@ -2073,9 +2082,9 @@ because it closes the only Session 10 exit criterion that went unmet.
 5. ~~**Export: CSV and PDF.**~~ **Done 2026-08-20 — see "Completed
    components (Phase 2 session 5)" below.** Both formats are owner-scoped,
    read in 100-receipt batches, and streamed to the client.
-6. **Tax-category tagging.** Per-receipt and per-item categories with a
-   rules layer, feeding an exportable tax summary. Builds on
-   `lib/categories.ts`.
+6. ~~**Tax-category tagging.**~~ **Done 2026-08-21 — see "Completed
+   components (Phase 2 session 6)" below.** A rules layer, item-level
+   categories finally read, and a year's summary that exports.
 7. **Multi-currency with historical FX.** Store the rate used at purchase
    time; never convert on read with today's rate. **Needs Omar**: an FX
    rate source — most free tiers forbid commercial use, the same licensing
@@ -2318,6 +2327,90 @@ to a green suite:
 Both routes also declare `runtime = "nodejs"` explicitly rather than
 relying on inference — the PDFKit `/ROOT` note above is the same class of
 failure, and it is not worth discovering twice.
+
+## Completed components (Phase 2 session 6 — tax-category tagging)
+
+Done 2026-08-21. `Receipt.category` existed and was set by hand;
+`ReceiptItem.category` had been in the schema since Phase 0 and **nothing
+had ever written to it** — the same shape of gap as Session 4's warranty
+columns. Both are now filled by a rules layer, and a year of them totals
+into something exportable.
+
+**The rules layer** (`src/lib/categories.ts`, pure and database-free so it
+can be tested without one)
+
+- A rule is a case- and punctuation-insensitive **substring**, not a
+  regular expression. A user-authored regex is two problems: a
+  denial-of-service vector evaluated server-side over every item of every
+  receipt, and something nobody can debug — "why did this rule fire?"
+  should be answerable by reading the rule. Normalisation means
+  `starbucks` catches `STARBUCKS #1174`.
+- Owner rules beat built-in defaults, always. The defaults are guesses
+  about how the world is named and will be wrong for someone; being able
+  to override them is what makes the layer usable instead of something to
+  work around.
+- `resolveCategory` returns **null** when nothing matches rather than
+  `OTHER`, so "no rule had an opinion" stays distinguishable from "a rule
+  decided OTHER". The whole never-overwrite-a-choice rule depends on that
+  distinction.
+- `explainCategory` names the rule that fired and whether it was the
+  owner's or a default — same reasoning as Session 3's search showing
+  *why* a receipt matched. A classification nobody can interrogate is one
+  nobody can correct.
+
+**Where it applies**
+
+- `POST /api/receipts`, the owner-facing path.
+- **Inbound email**, which is the one that mattered. No UI means nobody
+  picks a category, so every emailed receipt previously landed on the
+  schema default and stayed there — the tax summary's largest blind spot
+  was its most automatic source of data. Classification runs inside the
+  existing ingestion transaction, reading rules through the same client so
+  it cannot see a half-committed rule.
+- **Claim**, for merchant-issued receipts. Those have no owner when they
+  are created, so there are no rules to apply until the claim — that is
+  the first moment "whose categories?" has an answer. Deliberately *after*
+  the guarded update that makes claiming atomic: classification is a
+  convenience, and folding it into the guard would trade a real ownership
+  guarantee for a cosmetic one.
+- A category that was **chosen** is never overwritten. `OTHER` is read as
+  "no opinion" because it is indistinguishable in the payload from a
+  client that simply did not say — and refusing to classify until someone
+  picks something first would make the layer useless for exactly the
+  pathways that have no UI.
+
+**The summary** (`/tax`, `GET /api/reports/tax`, `GET /api/export/tax/csv`)
+
+- Two columns per category, because they answer different questions:
+  receipt totals (what a return asks for, one category per receipt) and
+  item totals (which cut across receipts — paracetamol bought during a
+  grocery shop is health spending on a groceries receipt). They do not add
+  up to each other and are not meant to.
+- **It does not say what is deductible, and it should not.** That depends
+  on jurisdiction, employment status and the purpose of each purchase —
+  facts this app does not have. A category quietly labelled "deductible"
+  would be tax advice by implication, and being wrong about it costs the
+  user money they would not discover until it mattered. Stated on the page
+  itself, not buried here.
+- Mixed currencies are **named, never summed**. Historical FX is Session 7;
+  converting at today's rate would produce a confident wrong number in
+  someone's return. The warning travels in the CSV as well as on the page,
+  because the file outlives the page it came from.
+- The CSV is not streamed, unlike the receipt exports: it is at most ten
+  rows plus a total, and the aggregation has to finish before the first
+  row is known anyway.
+
+**Rate limiting.** The tax CSV shares `receipt-export`'s bucket — the cost
+being limited is a vault walk, and this walks a year of one. The two new
+read-only routes are recorded in the exemption list Session 5's hardening
+added, with reasons, rather than left unlimited by omission.
+
+Verified: **384 tests across 49 files** (up from 346/44), typecheck clean,
+optimized build passing with all four new routes present. One earlier run
+of the suite reported four failures that did not reproduce across two
+subsequent clean runs — consistent with the parallel-load flakes recorded
+in `known-test-flakes`, and noted here rather than quietly re-run until
+green.
 
 ## Known open decisions
 

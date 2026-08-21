@@ -101,8 +101,10 @@ const DELIBERATELY_UNLIMITED: Record<string, string> = {
    * because they are cached per render and have never been the hot path —
    * but this is the entry to revisit first if anything here needs one.
    */
+  "category-rules": "A short owner-scoped list; a person has tens of rules, not thousands.",
   "reports/annual": "Aggregate over one vault, cached per render. Revisit if it becomes hot.",
   "reports/monthly": "Aggregate over one vault, cached per render. Revisit if it becomes hot.",
+  "reports/tax": "One year of one vault, same shape as the other reports. The CSV export of it *is* limited.",
   "search": "One indexed full-text query, bounded by LIMIT. Revisit if it becomes hot.",
 };
 
