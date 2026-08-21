@@ -10,16 +10,78 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-> **Next action: Phase 2 session 7 — multi-currency with historical FX.**
-> Store the rate used at purchase time; never convert on read with today's
-> rate. Session 6 left a visible placeholder for exactly this: the tax
-> summary refuses to add currencies together and says so on the page and
-> in the CSV.
+> **Next action: Phase 2 session 8 — the last session of the Vault
+> maturity phase.** Session 7's steps 1–3 are done; its step 4 needs Omar
+> and is recorded below rather than blocking anything.
 >
-> **Build it in this order. Steps 1–3 need nothing from anyone; only step
-> 4 is blocked on a decision.** The point of the ordering is that the
-> vendor question stops being a prerequisite: session 7 is a storage and
-> discipline problem, and the provider is one adapter behind an interface.
+> **Session 7 (multi-currency with historical FX): steps 1–3 are done,
+> 2026-08-21.** The requirement — store the rate used at purchase time,
+> never convert on read with today's rate — is met and shipped. The
+> feature works end to end today with no third party at all, through
+> manual rate entry. **Step 4, the API adapter, is the only part
+> outstanding and it needs Omar** (see "What still needs Omar" below).
+> Counting the session as done rather than deferred is deliberate: the
+> engineering deliverable is complete and in use, and the vendor choice
+> is an input to one adapter behind an interface, not a prerequisite the
+> rest was waiting on.
+>
+> What landed:
+>
+> - **`fx_rates`, append-only.** A correction supersedes rather than
+>   updates, so what this app believed a rate was in March survives the
+>   belief changing. Three partial unique indexes (raw SQL — Prisma cannot
+>   express them) make the resolver deterministic rather than dependent on
+>   row order.
+> - **An immutable snapshot on the receipt**, carrying every field needed
+>   to reproduce the arithmetic: both currencies, both minor-unit scales,
+>   the currency-metadata version those scales came from, the rate, the
+>   resolver and conversion policy versions, and the unrounded result
+>   alongside the rounded one. `fxRateId` is provenance, not a dependency
+>   — nothing reads through it to convert.
+> - **Currency metadata, because two decimals is not universal.**
+>   Everything before this session multiplied by 100. JPY has no minor
+>   unit and KWD has three, so converting ¥1000 as though it were ¥10.00
+>   is a factor of a hundred. An unknown currency now **fails closed**
+>   rather than defaulting to 2.
+> - **Rates are canonical decimal text, never IEEE-754.** Canonical form
+>   is strict on purpose: `1.5`, `1.50` and `1.500` must not all be
+>   storable, or two snapshots that look different mean the same thing and
+>   the audit trail stops being decidable. Non-canonical input is
+>   rejected, never coerced.
+> - **One rounding step, taken last.** Half-up rather than banker's,
+>   because this is money reconciled by hand against a card statement —
+>   recorded in the policy version so a later change is a new version
+>   rather than a silent re-rounding of history.
+> - **Reprocessing is explicit and versioned**, with lineage back to the
+>   figure it replaces. No background refresh may move a stored
+>   conversion; nothing calls it from a cron or a sync path.
+> - **The tax summary converts** at each receipt's stored rate instead of
+>   refusing, and still names what it cannot convert rather than folding
+>   it into a total — on the page and in the CSV, because the file
+>   outlives the page it came from.
+>
+> Two findings worth carrying forward:
+>
+> 1. **`prisma migrate dev` wants to drop the full-text GIN index every
+>    time.** `searchVector` is an `Unsupported("tsvector")` column, so the
+>    index created in session 3's raw migration is invisible to the schema
+>    and reads as drift. Applying that DROP would turn every search into a
+>    sequential scan — no error, no failing test, just a query plan that
+>    degrades with the size of a vault. It was removed from this
+>    migration by hand and the reason is written at the top of the file.
+>    **Check for it in every future generated migration.**
+> 2. **`AmbiguousRateError` is unreachable while the partial indexes
+>    exist**, which is the stronger result and why there is deliberately
+>    no test for it. It stays as defence in depth against a later
+>    migration dropping an index — precisely the failure that would turn
+>    "the active rate" back into "whichever row came back first".
+>
+> Superseded, kept because the ordering argument is what unblocked the
+> session: **build it in this order. Steps 1–3 need nothing from anyone;
+> only step 4 is blocked on a decision.** The point of the ordering is
+> that the vendor question stops being a prerequisite: session 7 is a
+> storage and discipline problem, and the provider is one adapter behind
+> an interface.
 >
 > 1. **An `fx_rates` table** — `(base, quote, date, rate, source,
 >    fetched_at)`. The rate is captured at ingest and **stored on the
@@ -87,6 +149,14 @@ date. That's a bug in this file, not a documentation nicety.
 > deliberate corrected version, while the original conversion and every prior
 > version remain retained and traceable. No background refresh may do this
 > implicitly.
+>
+> **What still needs Omar — step 4, the API adapter.** The seam is built
+> and empty: `src/lib/fx/provider.ts` defines `FxRateProvider` and
+> `configuredProvider()` returns `null`. Adding one is an implementation
+> of that interface and nothing above it changes — a fetched rate is
+> stored in `FxRate` exactly like a manual one, and the snapshot on the
+> receipt is identical in shape. Nothing is blocked in the meantime;
+> manual entry is a permanent path, not a stopgap.
 >
 > **What actually decides the provider is EGP, and it eliminates the
 > obvious answer.** The natural free choice is Frankfurter — ECB-backed,
@@ -2173,14 +2243,18 @@ because it closes the only Session 10 exit criterion that went unmet.
 6. ~~**Tax-category tagging.**~~ **Done 2026-08-21 — see "Completed
    components (Phase 2 session 6)" below.** A rules layer, item-level
    categories finally read, and a year's summary that exports.
-7. **Multi-currency with historical FX.** Store the rate used at purchase
-   time; never convert on read with today's rate. **Build in the order
-   recorded in the "Next action" block at the top of this file** — the
-   `fx_rates` table, then a provider interface with manual entry, then a
-   visible "rate unavailable" state, and only then an API adapter. The
-   first three need nobody. **Needs Omar** only for step 4: an FX
-   rate source — most free tiers forbid commercial use, the same licensing
-   trap already logged below for the Surya OCR weights.
+7. ~~**Multi-currency with historical FX.**~~ **Steps 1–3 done
+   2026-08-21 — see the top of this file for the full account.** The rate
+   is captured at ingest and stored on the receipt as an immutable
+   snapshot, so a revised series or a vanished provider can never change
+   what a past purchase cost. Rates are canonical decimal text rather
+   than floats, minor-unit scales are per-currency rather than assumed to
+   be two, and the tax summary converts at each receipt's stored rate
+   while still naming what it cannot convert. **Step 4, the API adapter,
+   needs Omar** — and the provider question is decided by EGP, which
+   eliminates the obvious free answer. Manual rate entry makes the
+   feature work end to end meanwhile, and is a permanent path rather than
+   a stopgap.
 
 ## Production data audit — DONE, 2026-08-18
 

@@ -12,6 +12,13 @@ and stays permanently searchable: warranty windows, return windows, tax
 categorization, and spend intelligence, all generated automatically instead
 of hand-entered.
 
+Receipts in a foreign currency carry the exchange rate **from the day they
+were bought**, stored on the receipt itself rather than looked up whenever
+a report is opened. A later rate correction records a new version instead
+of restating a figure you may already have filed a return on, and a receipt
+with no rate on file is named as unconverted rather than quietly folded
+into a total at today's rate.
+
 See [ROADMAP.md](./ROADMAP.md) for the full plan — canonical receipt schema,
 the QR claim-token protocol, merchant API/SDK, receipt authenticity/
 signatures, merchant terminal + payment-authorization integration, native

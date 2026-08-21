@@ -37,15 +37,23 @@ export async function taxSummaryCsv(ownerId: string, year: number): Promise<stri
   const body = rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
 
   /**
-   * The mixed-currency warning travels with the file, not just the page.
-   * A summary that silently added dollars to pounds would be a confident
-   * wrong number in someone's tax return — and the file is the artefact
-   * that outlives the page it was downloaded from.
+   * The warning travels with the file, not just the page. The file is the
+   * artefact that outlives the page it was downloaded from, and whoever
+   * reads it next April has no other way to know what it left out.
+   *
+   * Session 7 narrowed what it has to say. Mixed currencies *are*
+   * converted now, at the rate stored on each receipt at ingest. What
+   * still must be declared is the remainder: receipts with no rate on
+   * file are excluded from every total above, so the file names them and
+   * their untouched amounts rather than presenting a total that quietly
+   * omits them.
    */
   const warning =
-    summary.mixedCurrencies.length > 0
+    summary.unconverted.length > 0
       ? `\r\n\r\n${csvCell(
-          `WARNING: this year contains receipts in ${summary.mixedCurrencies.join(", ")}. Totals are NOT converted — historical FX is Phase 2 session 7.`,
+          `WARNING: ${summary.unconverted
+            .map((line) => `${line.receiptCount} receipt(s) in ${line.currency}`)
+            .join(", ")} are EXCLUDED from the totals above — no exchange rate is on file for the day they were bought. Totals are in ${summary.currency}, converted at the rate stored on each receipt at purchase time, never at today's rate.`,
         )}`
       : "";
 

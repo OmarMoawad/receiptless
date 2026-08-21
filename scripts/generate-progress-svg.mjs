@@ -18,11 +18,18 @@ import { dirname, resolve } from "node:path";
 const PHASES = [
   { name: "Canonical foundation", status: "done" },
   { name: "Reliable ingestion + accounts", status: "done" },
-  // Done: 2a, 2b, 3, 4, 5, 6. Session 1 (Vercel Pro + log drain) is
+  // Done: 2a, 2b, 3, 4, 5, 6, 7. Session 1 (Vercel Pro + log drain) is
   // *deferred*, not done — RECEIPTLESS_STATE.md says so in as many words,
   // and counting it here was overstating the phase by one session. A
   // deferred session is unfinished work; only a finished one counts.
-  { name: "Vault maturity", status: "current", sessionsDone: 6, sessionsTotal: 8 },
+  //
+  // Session 7 IS counted, and the distinction from session 1 is the point:
+  // its engineering deliverable is complete and in use — the rate is
+  // stored at purchase time and never recomputed on read — and the app
+  // works end to end today through manual entry. What remains is step 4,
+  // one adapter behind an interface, blocked on a licensing decision
+  // rather than on work. Session 1, by contrast, has nothing built at all.
+  { name: "Vault maturity", status: "current", sessionsDone: 7, sessionsTotal: 8 },
   { name: "Merchant API / SDK", status: "pending" },
   { name: "Merchant terminals & payment integration", status: "pending" },
   { name: "Native apps + platform NFC", status: "pending" },

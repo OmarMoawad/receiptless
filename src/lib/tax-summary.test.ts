@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { registerTestUser } from "@/test/auth-helpers";
 import { taxSummary, taxYearRange } from "./tax-summary";
+import { recordManualRate } from "./fx/rates";
+import { captureConversion } from "./fx/conversion-service";
 import { taxSummaryCsv } from "./tax-summary-export";
 
 async function receipt(
@@ -131,7 +133,7 @@ describe("the tax summary", () => {
     expect(summary.receiptCount).toBe(0);
   });
 
-  it("names mixed currencies instead of adding them together", async () => {
+  it("names a foreign receipt with no rate rather than adding it in", async () => {
     const owner = await registerTestUser();
     const tag = randomUUID().slice(0, 8);
 
@@ -151,10 +153,87 @@ describe("the tax summary", () => {
     });
 
     const summary = await taxSummary(owner.userId, 2026);
-    expect(summary.mixedCurrencies.sort()).toEqual(["EUR", "USD"]);
-    // Dominant by value, so the reported currency is the one most of the
-    // money is actually in.
+
+    // Session 7: the EUR receipt has no stored conversion, so it is
+    // excluded and named rather than summed at some invented rate.
     expect(summary.currency).toBe("USD");
+    expect(summary.totalMinor).toBe(1000);
+    expect(summary.receiptCount).toBe(1);
+    expect(summary.unconverted).toEqual([{ currency: "EUR", receiptCount: 1, totalMinor: 100 }]);
+  });
+
+  it("converts a foreign receipt once a rate is stored against it", async () => {
+    const owner = await registerTestUser();
+    const tag = randomUUID().slice(0, 8);
+
+    await recordManualRate({
+      ownerId: owner.userId,
+      base: "EUR",
+      quote: "USD",
+      effectiveDate: new Date("2026-02-02T00:00:00.000Z"),
+      rate: "1.08",
+      actorUserId: owner.userId,
+    });
+
+    await receipt(owner.userId, {
+      merchant: `Usd ${tag}`,
+      category: "OTHER",
+      totalMinor: 1000,
+      purchasedAt: "2026-02-01T00:00:00.000Z",
+      currency: "USD",
+    });
+    const foreign = await receipt(owner.userId, {
+      merchant: `Eur ${tag}`,
+      category: "OTHER",
+      totalMinor: 100,
+      purchasedAt: "2026-02-02T00:00:00.000Z",
+      currency: "EUR",
+    });
+    await captureConversion(foreign.id);
+
+    const summary = await taxSummary(owner.userId, 2026);
+
+    // €1.00 at 1.08 = $1.08, added to the $10.00 receipt.
+    expect(summary.totalMinor).toBe(1108);
+    expect(summary.receiptCount).toBe(2);
+    expect(summary.unconverted).toEqual([]);
+  });
+
+  it("does not move a converted total when the rate is later corrected", async () => {
+    const owner = await registerTestUser();
+    const tag = randomUUID().slice(0, 8);
+    const effectiveDate = new Date("2026-02-02T00:00:00.000Z");
+
+    await recordManualRate({
+      ownerId: owner.userId,
+      base: "EUR",
+      quote: "USD",
+      effectiveDate,
+      rate: "1.08",
+      actorUserId: owner.userId,
+    });
+    const foreign = await receipt(owner.userId, {
+      merchant: `Eur ${tag}`,
+      category: "OTHER",
+      totalMinor: 100,
+      purchasedAt: "2026-02-02T00:00:00.000Z",
+      currency: "EUR",
+    });
+    await captureConversion(foreign.id);
+
+    // The requirement in one assertion: a rate correction must not
+    // silently restate a figure someone may already have filed on.
+    await recordManualRate({
+      ownerId: owner.userId,
+      base: "EUR",
+      quote: "USD",
+      effectiveDate,
+      rate: "2",
+      actorUserId: owner.userId,
+      reason: "corrected",
+    });
+
+    expect((await taxSummary(owner.userId, 2026)).totalMinor).toBe(108);
   });
 });
 
@@ -175,7 +254,7 @@ describe("the CSV export of it", () => {
     expect(csv).toContain("TOTAL,1,1000");
   });
 
-  it("puts the mixed-currency warning in the file, not only on the page", async () => {
+  it("puts the excluded-receipt warning in the file, not only on the page", async () => {
     const owner = await registerTestUser();
     const tag = randomUUID().slice(0, 8);
     await receipt(owner.userId, {
@@ -195,8 +274,13 @@ describe("the CSV export of it", () => {
 
     const csv = await taxSummaryCsv(owner.userId, 2026);
     // The file outlives the page it came from, so the caveat has to
-    // travel with it.
+    // travel with it. Session 7 narrowed what the caveat says: the EUR
+    // receipt is excluded for want of a rate, and the file has to name it
+    // rather than present a total that quietly omits it.
     expect(csv).toContain("WARNING");
-    expect(csv).toContain("NOT converted");
+    expect(csv).toContain("EXCLUDED from the totals above");
+    expect(csv).toContain("1 receipt(s) in EUR");
+    // And it states what the totals it *does* show actually mean.
+    expect(csv).toContain("never at today's rate");
   });
 });

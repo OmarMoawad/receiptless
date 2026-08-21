@@ -1,6 +1,11 @@
 {
   "compilerOptions": {
-    "target": "ES2017",
+    // Session 7 raised this from ES2017. Exchange-rate arithmetic uses
+    // bigint literals (see lib/fx/decimal.ts), and BigInt is ES2020.
+    // Every runtime this app targets — Node 20+, and the browsers Next 16
+    // supports — has had BigInt for years; ES2017 was the create-next-app
+    // default rather than a constraint anything here depends on.
+    "target": "ES2020",
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
     "skipLibCheck": true,

@@ -51,16 +51,22 @@ enum VerificationLevel {
 // receiptless isn't client-side E2E encrypted (see RECEIPTLESS_STATE.md's
 // "Known open decisions" for whether that should change later).
 model User {
-  id           String    @id @default(cuid())
-  username     String    @unique
-  passwordHash String
-  createdAt    DateTime  @default(now())
-  sessions     Session[]
-  receipts     Receipt[]
-  inboundEmailAddress InboundEmailAddress?
+  id                     String                 @id @default(cuid())
+  username               String                 @unique
+  passwordHash           String
+  createdAt              DateTime               @default(now())
+  sessions               Session[]
+  receipts               Receipt[]
+  inboundEmailAddress    InboundEmailAddress?
   inboundEmailDeliveries InboundEmailDelivery[]
-  emailConnections EmailConnection[]
-  categoryRules CategoryRule[]
+  emailConnections       EmailConnection[]
+  categoryRules          CategoryRule[]
+
+  // Session 7: the currency this user's reports are expressed in. Every
+  // conversion targets it, and a receipt already in it is never converted
+  // at all.
+  reportingCurrency String   @default("USD")
+  fxRates           FxRate[]
 }
 
 model InboundEmailAddress {
@@ -98,8 +104,8 @@ model Merchant {
 }
 
 model Receipt {
-  id       String   @id @default(cuid())
-  merchant Merchant @relation(fields: [merchantId], references: [id])
+  id         String   @id @default(cuid())
+  merchant   Merchant @relation(fields: [merchantId], references: [id])
   merchantId String
 
   // Session 3 (RECEIPTLESS_STATE.md): null until claimed. A merchant-pushed
@@ -141,8 +147,9 @@ model Receipt {
   rawPayload String?
   notes      String?
 
-  items ReceiptItem[]
+  items                ReceiptItem[]
   inboundEmailDelivery InboundEmailDelivery?
+  conversions          ReceiptConversion[]
 
   /// Full-text search document: merchant name (weight A), item names (B),
   /// notes (C). Maintained by database triggers — see the
@@ -167,21 +174,21 @@ model Receipt {
 // lib/oauth-token-crypto.ts) — never as readable columns, and never
 // returned by any route.
 model EmailConnection {
-  id                 String    @id @default(cuid())
-  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId             String
-  provider           String
+  id                   String    @id @default(cuid())
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId               String
+  provider             String
   // Google's stable account id, so reconnecting the same mailbox updates
   // this row instead of creating a duplicate connection.
-  providerAccountId  String
+  providerAccountId    String
   providerAccountEmail String?
-  status             String    @default("pending")
-  encryptedTokenData String?
+  status               String    @default("pending")
+  encryptedTokenData   String?
   // Where the last scan finished, so a re-scan doesn't re-walk the whole
   // mailbox. Gmail's internalDate of the newest message already seen.
-  lastScannedAt      DateTime?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  lastScannedAt        DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   @@unique([userId, provider, providerAccountId])
   @@index([userId])
@@ -191,12 +198,12 @@ model EmailConnection {
 // is an anonymous top-level redirect carrying no session, so `state` is
 // the only thing tying it back to the user who started it.
 model OAuthConnectChallenge {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   userId       String
   provider     String
-  state        String   @unique
+  state        String    @unique
   pkceVerifier String
-  createdAt    DateTime @default(now())
+  createdAt    DateTime  @default(now())
   expiresAt    DateTime
   consumedAt   DateTime?
 
@@ -289,8 +296,8 @@ model ReceiptItem {
 // is an IP or a *hash* of a session token, never the token itself. A dump
 // of this table is a list of counters, not a set of credentials.
 model RateLimitCounter {
-  bucket  String
-  subject String
+  bucket      String
+  subject     String
   // Start of the current window; moves forward only when it expires.
   windowStart DateTime @default(now())
   count       Int      @default(0)
@@ -334,4 +341,109 @@ model CategoryRule {
 enum RuleTarget {
   MERCHANT
   ITEM
+}
+
+// Session 7 (RECEIPTLESS_STATE.md): the rate table.
+//
+// A rate is quote-currency units for ONE unit of base currency, stored as
+// canonical decimal *text* — never a float. See lib/fx/decimal.ts for why
+// text: a rate has more significant digits than a double holds exactly,
+// and the error is multiplied by every amount it touches.
+//
+// Rows are append-only. A correction does not update a rate, it inserts a
+// replacement pointing at the row it supersedes, so the history of what
+// this app believed a rate was stays intact. Two partial unique indexes
+// (see the migration) enforce at most one *active* row per key — one for
+// an owner's manual rate, one per provider source — so the resolver can
+// never silently pick whichever row was fetched last.
+model FxRate {
+  id String @id @default(cuid())
+
+  // Null for a provider rate, which is shared. Set for a manual rate,
+  // which is tenant-owned: one person's correction must never move
+  // another person's historical conversion.
+  owner   User?   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  ownerId String?
+
+  base          String
+  quote         String
+  effectiveDate DateTime @db.Date
+
+  rate                String
+  /// "manual", or a provider id once step 4 of the session lands.
+  source              String
+  sourcePolicyVersion String
+
+  // Provenance, sufficient to audit why this rate was the one chosen.
+  fetchedAt         DateTime?
+  enteredAt         DateTime?
+  actorUserId       String?
+  reason            String?
+  providerReference String?
+
+  supersedesId String?   @unique
+  supersedes   FxRate?   @relation("FxRateSupersedes", fields: [supersedesId], references: [id])
+  supersededBy FxRate?   @relation("FxRateSupersedes")
+  supersededAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  conversions ReceiptConversion[]
+
+  @@index([ownerId, base, quote, effectiveDate])
+  @@index([base, quote, effectiveDate])
+}
+
+// Session 7: the immutable snapshot of one conversion of one receipt.
+//
+// The receipt copies the rate rather than pointing at a live lookup, so a
+// revised series, a corrected rate, or a provider disappearing entirely
+// can never retroactively change what a past purchase cost. `fxRateId` is
+// provenance, not a dependency — every field needed to reproduce the
+// arithmetic is duplicated here on purpose.
+//
+// Corrections are versions, not edits: a reprocessing run inserts a new
+// row with `parentId` pointing at the one it replaces and flips `approved`.
+// A partial unique index allows one approved row per receipt, and every
+// superseded version is retained.
+model ReceiptConversion {
+  id        String  @id @default(cuid())
+  receipt   Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  receiptId String
+
+  version  Int
+  parentId String?            @unique
+  parent   ReceiptConversion? @relation("ConversionLineage", fields: [parentId], references: [id])
+  child    ReceiptConversion? @relation("ConversionLineage")
+  /// Reports select on this. Exactly one approved version per receipt.
+  approved Boolean            @default(true)
+
+  sourceCurrency          String
+  targetCurrency          String
+  sourceScale             Int
+  targetScale             Int
+  currencyMetadataVersion String
+
+  rate                    String
+  rateSource              String
+  rateEffectiveDate       DateTime @db.Date
+  ratePolicyVersion       String
+  conversionPolicyVersion String
+
+  /// The intermediate value before money rounding, so the rounding is
+  /// auditable rather than taken on trust.
+  unroundedResult  String
+  totalTargetMinor Int
+
+  fxRate   FxRate? @relation(fields: [fxRateId], references: [id])
+  fxRateId String?
+
+  operator      String?
+  reason        String?
+  correlationId String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([receiptId, version])
+  @@index([receiptId])
 }
