@@ -2433,6 +2433,22 @@ green.
   flagged by the same external review that shaped Session 3's isolation
   checklist above, not urgent enough to block any current session.
 
+- **Spending guardrails: where AI inference runs, and whether cohort
+  benchmarking happens at all.** ROADMAP.md's "Spending guardrails"
+  section (Phase 6, documented intent) needs two decisions *before* any
+  of it is built, not after. First, sending itemized purchase history to
+  a third-party model is a different privacy posture than anything in the
+  vault today and is in direct tension with the client-side E2E item
+  above — if the server can't read receipts it can't analyse them, so
+  on-device/self-hosted inference vs. a no-training processing agreement
+  is a fork that changes the architecture, not a vendor pick. Second, the
+  occupation-cohort benchmarking in that section requires k = 50 users per
+  cohort cell plus DP noise before a single comparison can be shown, and
+  carries a permanent prohibition on selling or exposing cohort
+  statistics to merchants, employers, insurers, or lenders — which
+  forecloses a monetization path Phase 3's merchant offering might
+  otherwise reach for. Both are Omar's calls.
+
 ## Hard gate: no real user data before ops infra exists
 
 Same discipline IDent's `IDent_STATE.md` applies to itself: staging/prod
