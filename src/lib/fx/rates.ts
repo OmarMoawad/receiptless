@@ -1,7 +1,7 @@
 import { prisma } from "../db";
 import { parseRate } from "./convert";
 import { minorUnitScale } from "./currency-metadata";
-import { MANUAL_POLICY_VERSION, MANUAL_SOURCE, configuredProvider } from "./provider";
+import { MANUAL_POLICY_VERSION, MANUAL_SOURCE, configuredProvider, type FxRateProvider } from "./provider";
 
 /**
  * Phase 2 session 7. Choosing *which* rate applies, deterministically.
@@ -152,12 +152,18 @@ async function activeRatesFor(where: {
  * visible "rate unavailable" state renders, and it is the honest answer
  * whenever no provider is configured and the owner has entered nothing.
  */
-export async function resolveRate(input: {
-  ownerId: string;
-  base: string;
-  quote: string;
-  on: Date;
-}): Promise<ResolvedRate | null> {
+export async function resolveRate(
+  input: {
+    ownerId: string;
+    base: string;
+    quote: string;
+    on: Date;
+  },
+  // Injectable so tests supply a fake and never reach the network — the
+  // same seam recordManualRate's callers use. Defaults to whatever the
+  // environment configured (null when nothing is).
+  provider: FxRateProvider | null = configuredProvider(),
+): Promise<ResolvedRate | null> {
   const base = input.base.trim().toUpperCase();
   const quote = input.quote.trim().toUpperCase();
   const on = utcDay(input.on);
@@ -189,8 +195,107 @@ export async function resolveRate(input: {
   const manual = pick(await activeRatesFor({ ownerId: input.ownerId, base, quote, from, to: on }));
   if (manual) return manual;
 
-  const provider = configuredProvider();
   if (!provider) return null;
 
-  return pick(await activeRatesFor({ ownerId: null, base, quote, from, to: on, source: provider.id }));
+  // A rate this provider has already fetched is reused rather than fetched
+  // again — the fetch is the expensive, billable, rate-limited part, and
+  // the whole point of `fx_rates` is that each (source, pair, date) is
+  // paid for once. A rate the provider fetched for an earlier request, or
+  // one it reached back to over a weekend, is found here.
+  const cached = pick(await activeRatesFor({ ownerId: null, base, quote, from, to: on, source: provider.id }));
+  if (cached) return cached;
+
+  // Nothing on file — ask the provider, and persist what it returns so the
+  // next resolve for this pair is a table read, not another fetch. This is
+  // the wiring that makes configuring a provider actually do something;
+  // without it the provider is built but never called.
+  const fetched = await provider.fetchRate(base, quote, on);
+  if (!fetched) return null;
+
+  const stored = await persistProviderRate(provider, base, quote, fetched);
+  return {
+    rate: stored.rate,
+    source: stored.source,
+    sourcePolicyVersion: stored.sourcePolicyVersion,
+    effectiveDate: stored.effectiveDate,
+    fxRateId: stored.id,
+    reachedBack: stored.effectiveDate.getTime() !== on.getTime(),
+  };
+}
+
+/**
+ * Writes a provider-fetched rate into `fx_rates`, keyed by the date the
+ * provider says it is *effective* — which may be earlier than the date
+ * asked for, when the provider reached back over a non-trading day. The
+ * effective date is what the snapshot and every later lookup key on, so it
+ * is what gets stored.
+ *
+ * Two fetches for the same pair and date can race — the ingestion paths
+ * that call this run per receipt. The partial unique index on active
+ * provider rows makes the second write fail rather than duplicate; that
+ * failure is caught and the row the winner wrote is read back, so a race
+ * resolves to one shared rate instead of an error.
+ */
+async function persistProviderRate(
+  provider: FxRateProvider,
+  base: string,
+  quote: string,
+  fetched: { rate: string; effectiveDate: Date; providerReference?: string },
+): Promise<{
+  id: string;
+  rate: string;
+  source: string;
+  sourcePolicyVersion: string;
+  effectiveDate: Date;
+}> {
+  // Validate the provider's rate the same way a manual one is validated,
+  // rather than trusting it: a non-canonical or non-positive rate is a bug
+  // in the adapter, and it should fail loudly here, not be stored.
+  const rate = parseRate(fetched.rate).text;
+  const effectiveDate = utcDay(fetched.effectiveDate);
+
+  const row = {
+    ownerId: null,
+    base,
+    quote,
+    effectiveDate,
+    rate,
+    source: provider.id,
+    sourcePolicyVersion: provider.policyVersion,
+    fetchedAt: new Date(),
+    providerReference: fetched.providerReference ?? null,
+  };
+
+  try {
+    const created = await prisma.fxRate.create({ data: row });
+    return {
+      id: created.id,
+      rate: created.rate,
+      source: created.source,
+      sourcePolicyVersion: created.sourcePolicyVersion,
+      effectiveDate: created.effectiveDate,
+    };
+  } catch (error) {
+    if (!isUniqueConflict(error)) throw error;
+
+    // Lost the race: another request stored this exact (source, pair,
+    // effective date). Read that winner back and use it, so both requests
+    // agree on one rate.
+    const existing = await prisma.fxRate.findFirst({
+      where: { ownerId: null, base, quote, effectiveDate, source: provider.id, supersededAt: null },
+    });
+    if (!existing) throw error;
+    return {
+      id: existing.id,
+      rate: existing.rate,
+      source: existing.source,
+      sourcePolicyVersion: existing.sourcePolicyVersion,
+      effectiveDate: existing.effectiveDate,
+    };
+  }
+}
+
+/** A Prisma unique-constraint violation, without importing the enum shape. */
+function isUniqueConflict(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: string }).code === "P2002";
 }
