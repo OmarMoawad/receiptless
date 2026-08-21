@@ -295,9 +295,32 @@ That ordering means every migration must be backwards-compatible with the
 currently-deployed code — additive columns, no destructive renames in the
 same release.
 
-`/api/health` reports `database: "unreachable"` if the app cannot reach
-the database at all, but it does **not** verify the schema is current;
-confirm `prisma migrate status` separately.
+> **Run this after every session that adds a migration — it is the step
+> most easily forgotten, and forgetting it fails silently.** Merging a
+> session's PR auto-deploys the *code* to production, but nothing applies
+> the *migration*. The deployed code then expects tables the production
+> database does not have. This bit us twice before it was caught: the
+> session-6 category-rules migration and the session-7 FX migration both
+> merged and deployed without being applied, and production sat
+> `degraded` (health 503) from the first until 2026-08-21, when a routine
+> health check surfaced two pending migrations at once. So: any session
+> whose diff touches `prisma/migrations/` is not finished when the PR
+> merges — it is finished when this command has run against production and
+> `/api/health` reads `schema: "ok"`.
+
+`/api/health` now catches this: it compares the build's migration
+directories against `_prisma_migrations` in the database and returns
+`schema: "behind"` with a `pendingMigrations` list (HTTP 503) when the
+database is behind the deployed code — see section 3. So the check after
+running the migration is simply:
+
+```bash
+curl -s https://receiptless-theta.vercel.app/api/health
+```
+
+Green is `"status":"ok"`, `"schema":"ok"`, and an empty
+`"pendingMigrations"`. A non-empty list names exactly which migrations
+still need applying.
 
 ## 5. Verify the deploy
 
