@@ -36,6 +36,58 @@ date. That's a bug in this file, not a documentation nicety.
 >    rather than substitute today's rate for it.
 > 4. **An API adapter**, once a provider is chosen. **Needs Omar.**
 >
+> **Snapshot contract for steps 1–3 (a required design, not a claim that
+> it exists today).** Define a rate as quote-currency units for one unit of
+> base currency, and accept it as a canonical base-10 decimal representation
+> — never an IEEE-754/JavaScript number. The supported rate precision,
+> calculation scale, and final-money rounding mode are a versioned
+> implementation decision to make before the migration, not constants this
+> roadmap pretends are settled. The selected policy/version, canonical rate,
+> and unrounded and rounded results belong in every snapshot. Input outside
+> that version's supported precision or canonical form must be rejected, not
+> silently truncated or coerced, so a future policy can still reproduce an
+> older conversion.
+>
+> A snapshot also names the receipt's source currency and the target/reporting
+> currency, plus the source and target minor-unit scales used for that
+> conversion. It identifies the versioned currency-metadata source which
+> supplied those scales (for example, the precise ISO-4217 dataset revision
+> or an explicitly versioned successor), rather than assuming every currency
+> has two decimal places. Receiptless currently uses a two-decimal
+> integer-minor-unit convention; supporting zero- and three-decimal
+> currencies is therefore a prerequisite design, migration, and test gap for
+> Session 7, not functionality this document claims already exists. The
+> applied rate, direction, effective date, currency-metadata version, and
+> rounded result must be reproducible without a provider call.
+>
+> A manual rate is tenant-owned, not a global mutable override: every manual
+> rate lookup and correction is scoped to its owner. For a given
+> owner/base/quote/effective-date key there can be one active manual rate; a
+> correction is an append-only replacement that identifies the rate it
+> supersedes, the person making it, when it was made, and why. Provider-rate
+> selection also needs a configured, versioned source policy and at most one
+> active provider rate for each source/base/quote/effective-date key. The
+> resolver records that policy/version and has deterministic precedence — an
+> owner's manual rate first, then the configured provider source — and rejects
+> an ambiguous key rather than choosing whichever row was fetched last.
+> Provider and manual entries alike need provenance sufficient to audit the
+> choice: source/provider identity, effective date, fetched or entered time,
+> and for manual entry the actor and stated reason (plus the provider response
+> or reference when one exists).
+>
+> The receipt must copy an immutable snapshot of the selected rate, currency
+> metadata, policy version, and provenance, not depend only on a live
+> `fx_rates` lookup. Later provider or manual corrections must not rewrite
+> that snapshot. If a correction really should change a receipt's derived
+> converted amount, use an explicit, authorised reprocessing operation that
+> creates an append-only conversion version with lineage to the original:
+> record the receipt, old and new snapshots, parent version, operator, reason,
+> timestamp, and run/correlation identifier. Reports must use an explicit
+> current-approved conversion-version selector; approval can move to a
+> deliberate corrected version, while the original conversion and every prior
+> version remain retained and traceable. No background refresh may do this
+> implicitly.
+>
 > **What actually decides the provider is EGP, and it eliminates the
 > obvious answer.** The natural free choice is Frankfurter — ECB-backed,
 > no API key, no signup and no card, which matters because Vercel already
@@ -55,8 +107,10 @@ date. That's a bug in this file, not a documentation nicety.
 > **Session 6 (tax-category tagging) is done, 2026-08-21.** A rules layer
 > classifies receipts and line items on the way in, on every ingestion
 > path including the ones with no UI; `/tax` totals a year by category and
-> exports it. Full detail under "Completed components (Phase 2 session
-> 6)" below.
+> exports it. Current verification is **384 tests across 49 files**;
+> typecheck is clean and the optimized build passes with all four new routes
+> present. Full detail under "Completed components (Phase 2 session 6)"
+> below.
 >
 > **Session 5 (CSV and PDF export) is done, 2026-08-20.** Both exports are
 > authenticated, owner-scoped, batched, and streamed. CSV is an analysis-
@@ -2308,10 +2362,11 @@ whole vault in application memory.
 The vault page links directly to both downloads. Focused route tests cover
 authentication, owner isolation, CSV edge cases, PDF headers and bytes,
 and the empty-vault case. A live authenticated export was rendered to an
-image and inspected for clipping, overlap, and readability. Final evidence:
-the complete suite passed **338/338**, typecheck passed, lint passed with
-six pre-existing warnings and no errors, and the optimized Turbopack build
-passed with both export routes present. `npm audit` still reports the known
+image and inspected for clipping, overlap, and readability. **At Session 5
+completion on 2026-08-20**, the complete suite passed **338/338**,
+typecheck passed, lint passed with six pre-existing warnings and no errors,
+and the optimized Turbopack build passed with both export routes present.
+`npm audit` still reports the known
 high-severity `deepmerge-ts` advisory through Prisma's CLI/config chain;
 the offered fix is a Prisma major downgrade, so it was recorded rather than
 silently forced into this feature session.
