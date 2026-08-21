@@ -12,11 +12,45 @@ date. That's a bug in this file, not a documentation nicety.
 
 > **Next action: Phase 2 session 7 — multi-currency with historical FX.**
 > Store the rate used at purchase time; never convert on read with today's
-> rate. **Needs Omar**: an FX rate source — most free tiers forbid
-> commercial use, the same licensing trap logged below for the Surya OCR
-> weights. Session 6 left a visible placeholder for exactly this: the tax
+> rate. Session 6 left a visible placeholder for exactly this: the tax
 > summary refuses to add currencies together and says so on the page and
 > in the CSV.
+>
+> **Build it in this order. Steps 1–3 need nothing from anyone; only step
+> 4 is blocked on a decision.** The point of the ordering is that the
+> vendor question stops being a prerequisite: session 7 is a storage and
+> discipline problem, and the provider is one adapter behind an interface.
+>
+> 1. **An `fx_rates` table** — `(base, quote, date, rate, source,
+>    fetched_at)`. The rate is captured at ingest and **stored on the
+>    receipt**, so a rate revision, a corrected series, or a provider
+>    disappearing entirely can never retroactively change what a past
+>    purchase cost. This is the whole requirement; everything else serves
+>    it.
+> 2. **A provider interface, with a manual-entry implementation first.**
+>    That alone makes the feature work end to end with zero third-party
+>    dependency, and it is what a person needs anyway for a currency no
+>    provider covers.
+> 3. **A visible "rate unavailable" state.** Same honesty the tax summary
+>    already applies to mixed currencies — say the number is not known
+>    rather than substitute today's rate for it.
+> 4. **An API adapter**, once a provider is chosen. **Needs Omar.**
+>
+> **What actually decides the provider is EGP, and it eliminates the
+> obvious answer.** The natural free choice is Frankfurter — ECB-backed,
+> no API key, no signup and no card, which matters because Vercel already
+> rejected the prepaid and virtual cards reachable from Egypt. But the
+> ECB's reference rates **do not include EGP**, and that is the currency
+> this app most needs. It would only have surfaced after building against
+> it.
+>
+> So the shortlist is providers with EGP *history*, where free tiers
+> typically either forbid commercial use or withhold historical data —
+> the same licensing trap logged below for the Surya OCR weights. Do not
+> pick one from memory: terms and pricing change, so check two or three
+> candidates' **current** terms for EGP historical coverage and commercial
+> use, and put the comparison in front of Omar. By then the app already
+> works through manual entry, so the decision is unhurried and reversible.
 >
 > **Session 6 (tax-category tagging) is done, 2026-08-21.** A rules layer
 > classifies receipts and line items on the way in, on every ingestion
@@ -2086,7 +2120,11 @@ because it closes the only Session 10 exit criterion that went unmet.
    components (Phase 2 session 6)" below.** A rules layer, item-level
    categories finally read, and a year's summary that exports.
 7. **Multi-currency with historical FX.** Store the rate used at purchase
-   time; never convert on read with today's rate. **Needs Omar**: an FX
+   time; never convert on read with today's rate. **Build in the order
+   recorded in the "Next action" block at the top of this file** — the
+   `fx_rates` table, then a provider interface with manual entry, then a
+   visible "rate unavailable" state, and only then an API adapter. The
+   first three need nobody. **Needs Omar** only for step 4: an FX
    rate source — most free tiers forbid commercial use, the same licensing
    trap already logged below for the Surya OCR weights.
 
