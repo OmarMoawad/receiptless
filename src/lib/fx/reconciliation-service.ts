@@ -31,13 +31,6 @@ import { captureConversion, reprocessConversion } from "./conversion-service";
  */
 export type FxReconciliationCategory = "sameCurrency" | "alreadyCurrent" | "missing" | "oldTarget";
 
-const CATEGORY_KEYS: FxReconciliationCategory[] = [
-  "sameCurrency",
-  "alreadyCurrent",
-  "missing",
-  "oldTarget",
-];
-
 type CategoryCounts = Record<FxReconciliationCategory, number>;
 
 function zeroCounts(): CategoryCounts {

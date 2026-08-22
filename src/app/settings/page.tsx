@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getCurrentUserFromCookies } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { knownCurrencies } from "@/lib/fx/currency-metadata";
+import { previewFxReconciliation } from "@/lib/fx/reconciliation-service";
 import { ReportingCurrencyForm } from "./reporting-currency-form";
 import { FxReconciliation } from "./fx-reconciliation";
 
@@ -29,10 +30,13 @@ export default async function SettingsPage() {
     );
   }
 
-  const row = await prisma.user.findUniqueOrThrow({
-    where: { id: user.userId },
-    select: { reportingCurrency: true },
-  });
+  const [row, fxPreview] = await Promise.all([
+    prisma.user.findUniqueOrThrow({
+      where: { id: user.userId },
+      select: { reportingCurrency: true },
+    }),
+    previewFxReconciliation(user.userId),
+  ]);
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-6">
@@ -61,7 +65,13 @@ export default async function SettingsPage() {
       </section>
 
       <section className="space-y-3 border-t border-neutral-200 dark:border-neutral-800 pt-6">
-        <FxReconciliation reportingCurrency={row.reportingCurrency} />
+        <FxReconciliation
+          preview={{
+            reportingCurrency: fxPreview.reportingCurrency,
+            total: fxPreview.total,
+            eligible: fxPreview.eligible,
+          }}
+        />
         <p className="text-xs text-neutral-500 max-w-prose">
           Changing your reporting currency never rewrites past receipts on its own.
           This is where you ask for that work explicitly: preview how many receipts

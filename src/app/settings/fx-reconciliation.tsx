@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 /**
@@ -20,11 +20,10 @@ import { useRouter } from "next/navigation";
  *   and a receipt with no rate is left untouched for a manual rate + rerun.
  */
 
-type Preview = {
+export type FxReconciliationPreviewProps = {
   reportingCurrency: string;
   total: number;
   eligible: number;
-  categories: { sameCurrency: number; alreadyCurrent: number; missing: number; oldTarget: number };
 };
 
 type ApplyResults = {
@@ -38,7 +37,7 @@ type ApplyResults = {
 
 type Cursor = { purchasedAt: string; id: string };
 
-type Status = "idle" | "loadingPreview" | "ready" | "applying" | "complete" | "error";
+type Status = "ready" | "applying" | "complete" | "error";
 
 const zeroResults = (): ApplyResults => ({
   converted: 0,
@@ -49,37 +48,19 @@ const zeroResults = (): ApplyResults => ({
   failed: 0,
 });
 
-export function FxReconciliation({ reportingCurrency }: { reportingCurrency: string }) {
+/**
+ * The preview is computed server-side and passed in, so the control opens
+ * on the truth rather than fetching on mount — the same discipline the
+ * reporting-currency form uses. Apply still walks the API in batches.
+ */
+export function FxReconciliation({ preview }: { preview: FxReconciliationPreviewProps }) {
   const router = useRouter();
-  const [status, setStatus] = useState<Status>("idle");
-  const [preview, setPreview] = useState<Preview | null>(null);
+  const [status, setStatus] = useState<Status>("ready");
   const [processed, setProcessed] = useState(0);
   const [results, setResults] = useState<ApplyResults>(zeroResults());
   const [error, setError] = useState<string | null>(null);
 
-  const loadPreview = useCallback(async () => {
-    setStatus("loadingPreview");
-    setError(null);
-    try {
-      const response = await fetch("/api/fx/reconciliation/preview", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-      });
-      if (!response.ok) throw new Error("Could not load the preview.");
-      setPreview((await response.json()) as Preview);
-      setStatus("ready");
-    } catch (caught) {
-      setStatus("error");
-      setError(caught instanceof Error ? caught.message : "Could not load the preview.");
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadPreview();
-  }, [loadPreview]);
-
   async function apply() {
-    if (!preview) return;
     setStatus("applying");
     setError(null);
     setProcessed(0);
@@ -144,32 +125,26 @@ export function FxReconciliation({ reportingCurrency }: { reportingCurrency: str
     <div className="space-y-3">
       <h2 className="text-sm font-medium">Reconcile past receipts</h2>
 
-      {status === "loadingPreview" && <p className="text-sm text-neutral-500">Checking your receipts…</p>}
+      <p className="text-sm text-neutral-600 dark:text-neutral-300">
+        {preview.eligible === 0
+          ? `Every receipt is already reportable in ${preview.reportingCurrency}.`
+          : `${preview.eligible} of ${preview.total} receipt(s) are not yet reported in ${preview.reportingCurrency}.`}
+      </p>
+      <p className="text-xs text-neutral-500 max-w-prose">
+        This is an estimate, not a guarantee: a receipt with no exchange rate on file
+        for its purchase date stays unavailable until you enter one, and can then be
+        reconciled on a rerun.
+      </p>
 
-      {preview && (
-        <>
-          <p className="text-sm text-neutral-600 dark:text-neutral-300">
-            {preview.eligible === 0
-              ? `Every receipt is already reportable in ${preview.reportingCurrency}.`
-              : `${preview.eligible} of ${preview.total} receipt(s) are not yet reported in ${preview.reportingCurrency}.`}
-          </p>
-          <p className="text-xs text-neutral-500 max-w-prose">
-            This is an estimate, not a guarantee: a receipt with no exchange rate on
-            file for its purchase date stays unavailable until you enter one, and can
-            then be reconciled on a rerun.
-          </p>
-
-          {preview.eligible > 0 && (
-            <button
-              type="button"
-              onClick={apply}
-              disabled={status === "applying"}
-              className="rounded bg-emerald-600 text-white px-4 py-2 text-sm disabled:opacity-40"
-            >
-              {status === "applying" ? "Applying…" : "Apply reconciliation"}
-            </button>
-          )}
-        </>
+      {preview.eligible > 0 && (
+        <button
+          type="button"
+          onClick={apply}
+          disabled={status === "applying"}
+          className="rounded bg-emerald-600 text-white px-4 py-2 text-sm disabled:opacity-40"
+        >
+          {status === "applying" ? "Applying…" : "Apply reconciliation"}
+        </button>
       )}
 
       {(status === "applying" || status === "complete") && (
