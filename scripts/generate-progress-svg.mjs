@@ -18,19 +18,22 @@ import { dirname, resolve } from "node:path";
 const PHASES = [
   { name: "Canonical foundation", status: "done" },
   { name: "Reliable ingestion + accounts", status: "done" },
-  // Done: 2a, 2b, 3, 4, 5, 6, 7. Session 1 (Vercel Pro + log drain) is
-  // *deferred*, not done — RECEIPTLESS_STATE.md says so in as many words,
-  // and counting it here was overstating the phase by one session. A
-  // deferred session is unfinished work; only a finished one counts.
+  // Done: 2a, 2b, 3, 4, 5, 6, 7, 8. Session 8 (FX reconciliation) closed
+  // this phase on 2026-08-22 — the cold-cache holiday lookup, conversion
+  // races, stale-target reporting and Apify token placement from the
+  // session-7 review are all fixed, and the owner-driven Settings
+  // reconciliation flow shipped.
   //
-  // Session 7 IS counted, and the distinction from session 1 is the point:
-  // its engineering deliverable is complete and in use — the rate is
-  // stored at purchase time and never recomputed on read — and the app
-  // works end to end today through manual entry. What remains is step 4,
-  // one adapter behind an interface, blocked on a licensing decision
-  // rather than on work. Session 1, by contrast, has nothing built at all.
-  { name: "Vault maturity", status: "current", sessionsDone: 7, sessionsTotal: 8 },
-  { name: "Merchant API / SDK", status: "pending" },
+  // Session 1 (Vercel Pro + log drain) stays *deferred*, not done —
+  // RECEIPTLESS_STATE.md says so in as many words — and is still not
+  // counted. It un-defers only when this charges money or a real
+  // killed-invocation post-mortem needs it; the phase closes without it.
+  { name: "Vault maturity", status: "done" },
+  // Phase 3 is now current at 0/8. Sessions 1–7 are buildable; session 8
+  // (the live Square merchant pilot) is externally blocked on a real
+  // merchant account and its credentials, so the phase does not close on
+  // session 7 — hence a denominator of 8, not 7.
+  { name: "Merchant API / SDK", status: "current", sessionsDone: 0, sessionsTotal: 8 },
   { name: "Merchant terminals & payment integration", status: "pending" },
   { name: "Native apps + platform NFC", status: "pending" },
   { name: "Financial intelligence", status: "pending" },

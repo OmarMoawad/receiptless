@@ -156,3 +156,38 @@ export const reportingCurrencyInputSchema = z.object({
 });
 
 export type ReportingCurrencyInput = z.infer<typeof reportingCurrencyInputSchema>;
+
+/**
+ * Session 8: applying FX reconciliation to historical receipts.
+ *
+ * Everything the owner may send is bounded and typed. The receipt owner is
+ * never in the body — the handler takes it from the session — so the only
+ * position a request supplies is a cursor, which is a spot inside that
+ * owner's own ordering and cannot reach another tenant. `limit` is capped
+ * at ten so one request can never ask for an unbounded batch. The
+ * correlation id must be the `fx-reconciliation:<uuid>` the client
+ * generated per run, so it is safe to store and to log.
+ */
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const fxReconciliationCorrelationSchema = z
+  .string()
+  .trim()
+  .regex(/^fx-reconciliation:[0-9a-f-]{36}$/i, "Correlation id must be fx-reconciliation:<uuid>")
+  .refine((value) => uuidPattern.test(value.slice("fx-reconciliation:".length)), {
+    message: "Correlation id must carry a valid UUID",
+  });
+
+export const fxReconciliationCursorSchema = z.object({
+  purchasedAt: z.iso.datetime({ offset: true }).or(z.iso.datetime()),
+  id: z.string().trim().min(1).max(64),
+});
+
+export const applyFxReconciliationInputSchema = z.object({
+  cursor: fxReconciliationCursorSchema.optional(),
+  limit: z.number().int().min(1).max(10),
+  expectedReportingCurrency: reportingCurrencySchema,
+  correlationId: fxReconciliationCorrelationSchema,
+});
+
+export type ApplyFxReconciliationRequest = z.infer<typeof applyFxReconciliationInputSchema>;

@@ -30,12 +30,24 @@ export type FxRateQuote = {
   providerReference?: string;
 };
 
+/**
+ * The inclusive date range a provider may answer from, `[from, on]`.
+ *
+ * The resolver is the authority on the lookback (see `MAX_RATE_LOOKBACK_DAYS`
+ * in `rates.ts`) — the provider is told the whole window and returns the
+ * newest valid rate inside it, in one request, rather than being asked one
+ * date at a time and made to retry over each weekend and holiday. `on` is
+ * the purchase date; `from` is the earliest effective date the resolver will
+ * accept. A row outside `[from, on]` is not this window's answer.
+ */
+export type FxRateWindow = { from: Date; on: Date };
+
 export interface FxRateProvider {
   /** Stored as `FxRate.source`. Stable — it appears in every snapshot. */
   readonly id: string;
   /** Bumped when the provider's own series or terms change materially. */
   readonly policyVersion: string;
-  fetchRate(base: string, quote: string, on: Date): Promise<FxRateQuote | null>;
+  fetchRate(base: string, quote: string, window: FxRateWindow): Promise<FxRateQuote | null>;
 }
 
 /** Manual entry is tenant data, not a provider — but it needs a source id. */

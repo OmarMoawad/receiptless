@@ -1,4 +1,4 @@
-import type { FxRateProvider, FxRateQuote } from "../provider";
+import type { FxRateProvider, FxRateQuote, FxRateWindow } from "../provider";
 
 /**
  * Phase 2 session 7, step 4 — the Central Bank of Egypt rate provider.
@@ -98,35 +98,61 @@ export function cbeRateToCanonicalString(value: number | undefined): string | nu
 }
 
 /**
- * The pure half of the provider: given the actor's rows, pick the one for
- * this exact pair and turn it into a quote. Separated from the network so
- * it can be tested against real captured payloads without a token.
+ * The pure half of the provider: given the actor's rows for a date range,
+ * pick the newest valid one for this exact pair and turn it into a quote.
+ * Separated from the network so it can be tested against real captured
+ * payloads without a token.
+ *
+ * A range request answers a weekend or holiday purchase in one call: asking
+ * for Friday–Sunday returns Friday's published row, and this selects it by
+ * **greatest effective date within the window**, not by the actor's row
+ * order. A row for the pair but dated outside `[window.from, window.on]` —
+ * or one whose rate or date will not parse — is skipped rather than trusted,
+ * so the resolver never persists a rate from beyond the lookback it set.
  */
 export function quoteFromRows(
   rows: CbeRow[],
   base: string,
   quote: string,
   side: CbeRateSide,
+  window: FxRateWindow,
 ): FxRateQuote | null {
   const wantBase = base.trim().toUpperCase();
   const wantQuote = quote.trim().toUpperCase();
   const field = SIDE_FIELD[side];
+  const floor = window.from.getTime();
+  const ceil = window.on.getTime();
 
-  const row = rows.find(
-    (candidate) =>
-      candidate.base?.trim().toUpperCase() === wantBase &&
-      candidate.target?.trim().toUpperCase() === wantQuote,
-  );
-  if (!row) return null;
+  let best: { rate: string; effectiveDate: Date; date: string } | null = null;
+  for (const candidate of rows) {
+    if (
+      candidate.base?.trim().toUpperCase() !== wantBase ||
+      candidate.target?.trim().toUpperCase() !== wantQuote
+    ) {
+      continue;
+    }
 
-  const rate = cbeRateToCanonicalString(row[field]);
-  const effectiveDate = fromCbeDate(row.date);
-  if (!rate || !effectiveDate) return null;
+    const rate = cbeRateToCanonicalString(candidate[field]);
+    const effectiveDate = fromCbeDate(candidate.date);
+    if (!rate || !effectiveDate) continue;
+
+    // Reject anything outside the window the resolver asked for, in either
+    // direction: a stale row before the floor, or a future row after the
+    // purchase date, is not this window's answer.
+    const time = effectiveDate.getTime();
+    if (time < floor || time > ceil) continue;
+
+    if (!best || time > best.effectiveDate.getTime()) {
+      best = { rate, effectiveDate, date: candidate.date };
+    }
+  }
+
+  if (!best) return null;
 
   return {
-    rate,
-    effectiveDate,
-    providerReference: `cbe:${row.date}:${wantBase}/${wantQuote}:${side}`,
+    rate: best.rate,
+    effectiveDate: best.effectiveDate,
+    providerReference: `cbe:${best.date}:${wantBase}/${wantQuote}:${side}`,
   };
 }
 
@@ -158,7 +184,7 @@ export class ApifyCbeProvider implements FxRateProvider {
     this.policyVersion = `cbe-${this.side}@1`;
   }
 
-  async fetchRate(base: string, quote: string, on: Date): Promise<FxRateQuote | null> {
+  async fetchRate(base: string, quote: string, window: FxRateWindow): Promise<FxRateQuote | null> {
     const wantBase = base.trim().toUpperCase();
     const wantQuote = quote.trim().toUpperCase();
 
@@ -169,12 +195,14 @@ export class ApifyCbeProvider implements FxRateProvider {
     // answer, handled downstream as the unavailable state.
     const crossRate = wantBase !== "EGP" && wantQuote !== "EGP";
     const requested = crossRate ? [wantBase, wantQuote] : [wantBase === "EGP" ? wantQuote : wantBase];
-    const day = toCbeDate(on);
 
+    // One inclusive range request across the whole lookback window, so a
+    // Sunday or holiday purchase discovers Friday's rate in a single call
+    // rather than an eight-request retry loop.
     const input = {
       currencies: requested,
-      fromDate: day,
-      toDate: day,
+      fromDate: toCbeDate(window.from),
+      toDate: toCbeDate(window.on),
       includeConversionRate: this.side === "mid",
       includeBuySell: this.side !== "mid",
       includeCrossRates: crossRate,
@@ -183,11 +211,18 @@ export class ApifyCbeProvider implements FxRateProvider {
     // The actor id is `owner/name` for humans and `owner~name` in the API
     // path; accept the friendly form in config and convert here.
     const path = this.actor.replace("/", "~");
-    const url = `https://api.apify.com/v2/acts/${path}/run-sync-get-dataset-items?token=${encodeURIComponent(this.token)}`;
+    const url = `https://api.apify.com/v2/acts/${path}/run-sync-get-dataset-items`;
 
+    // The token travels in the Authorization header, never the URL: a URL is
+    // logged by proxies, error trackers and the browser's own history, and a
+    // token that reaches any of those is a leaked credential. Apify accepts
+    // `Bearer <token>`.
     const response = await this.fetchImpl(url, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${this.token}`,
+      },
       body: JSON.stringify(input),
     });
 
@@ -198,6 +233,6 @@ export class ApifyCbeProvider implements FxRateProvider {
     const rows = (await response.json()) as CbeRow[];
     if (!Array.isArray(rows)) return null;
 
-    return quoteFromRows(rows, wantBase, wantQuote, this.side);
+    return quoteFromRows(rows, wantBase, wantQuote, this.side, window);
   }
 }

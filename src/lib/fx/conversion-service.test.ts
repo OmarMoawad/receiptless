@@ -310,6 +310,68 @@ describe("capturing a conversion onto a receipt", () => {
   });
 });
 
+describe("concurrent capture and audit context", () => {
+  async function ownerRateReceipt() {
+    const user = await ownerWithReportingCurrency("USD");
+    await recordManualRate({
+      ownerId: user.userId,
+      base: "EGP",
+      quote: "USD",
+      effectiveDate: new Date("2026-03-02T00:00:00Z"),
+      rate: "0.0207",
+      actorUserId: user.userId,
+    });
+    const receipt = await receiptFor(user.userId, {
+      currency: "EGP",
+      totalMinor: 500_00,
+      purchasedAt: "2026-03-02T10:00:00Z",
+    });
+    return { user, receipt };
+  }
+
+  it("resolves two concurrent initial captures to a single approved snapshot", async () => {
+    const { receipt } = await ownerRateReceipt();
+
+    // The race every ingestion path can trigger: the mailbox scan and the
+    // receipt page both capturing at once. Exactly one row may result.
+    const [left, right] = await Promise.all([
+      captureConversion(receipt.id),
+      captureConversion(receipt.id),
+    ]);
+
+    expect(left.status).toBe("converted");
+    expect(right.status).toBe("converted");
+    expect(await prisma.receiptConversion.count({ where: { receiptId: receipt.id } })).toBe(1);
+    expect(
+      await prisma.receiptConversion.count({ where: { receiptId: receipt.id, approved: true } }),
+    ).toBe(1);
+  });
+
+  it("records operator, reason and correlation id when capture is given a context", async () => {
+    const { user, receipt } = await ownerRateReceipt();
+
+    await captureConversion(receipt.id, {
+      operator: user.userId,
+      reason: "owner-requested FX reconciliation",
+      correlationId: "fx-reconciliation:run-7",
+    });
+
+    const row = await prisma.receiptConversion.findFirstOrThrow({ where: { receiptId: receipt.id } });
+    expect(row.operator).toBe(user.userId);
+    expect(row.reason).toBe("owner-requested FX reconciliation");
+    expect(row.correlationId).toBe("fx-reconciliation:run-7");
+  });
+
+  it("returns only a source/target-compatible snapshot when currencies are given", async () => {
+    const { receipt } = await ownerRateReceipt();
+    await captureConversion(receipt.id);
+
+    // The compatible pair is returned; a mismatched target is not.
+    expect(await approvedConversion(receipt.id, "EGP", "USD")).not.toBeNull();
+    expect(await approvedConversion(receipt.id, "EGP", "GBP")).toBeNull();
+  });
+});
+
 describe("reprocessing", () => {
   it("creates a new approved version with lineage, and retains the original", async () => {
     const user = await ownerWithReportingCurrency("USD");

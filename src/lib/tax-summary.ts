@@ -60,6 +60,12 @@ export type TaxSummary = {
   receiptCount: number;
   /** Receipts excluded from the totals above, grouped by their currency. */
   unconverted: UnconvertedCurrencyLine[];
+  /**
+   * The ids of every excluded receipt, so a caller — the reconciliation
+   * flow especially — can act on exactly which receipts still need a rate
+   * or a reprocess into the current reporting currency, not just how many.
+   */
+  unconvertedReceiptIds: string[];
 };
 
 export function taxYearRange(year: number): { start: Date; end: Date } {
@@ -98,12 +104,27 @@ export async function taxSummary(ownerId: string, year: number): Promise<TaxSumm
   );
 
   const unconverted = new Map<string, UnconvertedCurrencyLine>();
+  const unconvertedReceiptIds: string[] = [];
   let totalMinor = 0;
   let receiptCount = 0;
 
   for (const receipt of receipts) {
     const receiptCurrency = receipt.currency.trim().toUpperCase();
-    const snapshot = receipt.conversions[0];
+    const approved = receipt.conversions[0];
+
+    // Only a snapshot whose source matches this receipt and whose target is
+    // the *current* reporting currency may be used. An approved conversion
+    // into a currency the owner has since changed away from is not a
+    // conversion into the one every total here is expressed in — using it
+    // would sum a figure in the wrong currency under this one's label. Such
+    // a receipt is treated as unconverted and named, exactly like one with
+    // no rate at all, until it is reprocessed into the current currency.
+    const snapshot =
+      approved &&
+      approved.sourceCurrency.trim().toUpperCase() === receiptCurrency &&
+      approved.targetCurrency.trim().toUpperCase() === reportingCurrency
+        ? approved
+        : undefined;
 
     /**
      * Converts one amount from this receipt into the reporting currency.
@@ -136,6 +157,7 @@ export async function taxSummary(ownerId: string, year: number): Promise<TaxSumm
       line.receiptCount += 1;
       line.totalMinor += receipt.totalMinor;
       unconverted.set(receiptCurrency, line);
+      unconvertedReceiptIds.push(receipt.id);
       continue;
     }
 
@@ -169,5 +191,6 @@ export async function taxSummary(ownerId: string, year: number): Promise<TaxSumm
     totalMinor,
     receiptCount,
     unconverted: [...unconverted.values()].sort((a, b) => b.totalMinor - a.totalMinor),
+    unconvertedReceiptIds,
   };
 }

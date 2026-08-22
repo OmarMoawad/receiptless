@@ -10,9 +10,49 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-> **Next action: Phase 2 session 8 — the last session of the Vault
-> maturity phase.** Session 7's steps 1–3 are done; its step 4 needs Omar
-> and is recorded below rather than blocking anything.
+> **Next action: Phase 3 (Merchant API / SDK) session 1 — merchant
+> tenancy and isolation.** Vault maturity is closed. See the Desktop
+> execution plan (`README-IDent-Receiptless-Execution-Plan.md`) and its
+> `EXECUTION-LEDGER.md` for Phase 3's session sequence; the shared design
+> and per-session plans are committed in the
+> `.worktrees/phase-3-merchant-platform-spec` worktree.
+>
+> **Session 8 (FX reconciliation) is done, 2026-08-22, and closes Phase 2
+> (Vault maturity).** It fixed the four defects the session-7 review
+> found and shipped the owner-driven reconciliation flow:
+>
+> - **Cold-cache holiday lookup.** The rate-provider contract widened from
+>   a single date to an inclusive `[from, on]` window, so a Sunday or
+>   holiday purchase discovers Friday's rate in one range request instead
+>   of an eight-request retry loop. The CBE adapter picks the newest valid
+>   in-window row regardless of actor row order, and the resolver
+>   re-rejects any out-of-window date before it reaches `fx_rates`.
+> - **Apify token moved out of the URL** into an `Authorization: Bearer`
+>   header, so it can never leak through a logged or historied URL.
+> - **Conversion races** in initial capture and reprocessing now recover
+>   from the partial-unique `P2002` by rereading the approved winner, so
+>   concurrent callers converge on exactly one approved snapshot.
+> - **Stale-target tax reporting** fixed: a tax summary uses an approved
+>   conversion only when its target is the *current* reporting currency; a
+>   snapshot into a currency the owner has since left is named as
+>   unconverted, never summed under the wrong label.
+> - **Owner reconciliation flow:** `previewFxReconciliation` (read-only,
+>   no provider call) and `applyFxReconciliation` (deterministic
+>   `(purchasedAt, id)` batches of ten, keyset cursor, per-run audit
+>   context, stale-currency rejection), behind two session-scoped POST
+>   endpoints and a Settings control. **No schema migration** — it reuses
+>   the existing conversion provenance fields, so there is no prod
+>   `migrate deploy` step for this session.
+>
+> **The CBE adapter is implemented and wired** (session 7 step 4); it is
+> off unless `FX_PROVIDER=apify-cbe` and `APIFY_TOKEN` are set, and manual
+> rate entry makes the whole feature work end to end with no provider at
+> all. Session 1's Vercel Pro / log drain remains **deferred, not done**.
+>
+> **Not verified in this session:** the Settings reconciliation UI has no
+> automated test — this repo has no jsdom/testing-library harness and its
+> client components (e.g. the reporting-currency form) are verified by
+> browser click-through, which is still pending here.
 >
 > **Session 7 (multi-currency with historical FX): steps 1–3 are done,
 > 2026-08-21.** The requirement — store the rate used at purchase time,

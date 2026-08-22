@@ -67,9 +67,50 @@ function toSnapshot(row: {
   };
 }
 
-export async function approvedConversion(receiptId: string): Promise<ConversionSnapshot | null> {
+/**
+ * Audit provenance for a conversion the owner asked for explicitly — the
+ * reconciliation flow and rate corrections both travel it. `correlationId`
+ * ties every row a single Apply run wrote together across its batches.
+ */
+export type ConversionAuditContext = { operator: string; reason: string; correlationId?: string };
+
+/** A Prisma unique-constraint violation, without importing the enum shape. */
+function isUniqueConflict(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: string }).code === "P2002";
+}
+
+/**
+ * The approved conversion for a receipt, or null.
+ *
+ * With `sourceCurrency`/`targetCurrency` supplied it returns the snapshot
+ * **only when it is compatible** — its source matches the receipt's currency
+ * and its target matches the currency asked about. A snapshot into a
+ * reporting currency the owner has since changed away from is not a
+ * conversion into the current one, and answering with it would let a stale
+ * figure be summed as though it were current (see `tax-summary.ts`). Called
+ * with just the receipt id it returns whatever approved row exists, which is
+ * what the idempotency and provenance checks want.
+ */
+export async function approvedConversion(
+  receiptId: string,
+  sourceCurrency?: string,
+  targetCurrency?: string,
+): Promise<ConversionSnapshot | null> {
   const row = await prisma.receiptConversion.findFirst({ where: { receiptId, approved: true } });
-  return row ? toSnapshot(row) : null;
+  if (!row) return null;
+
+  if (sourceCurrency !== undefined && targetCurrency !== undefined) {
+    const wantSource = sourceCurrency.trim().toUpperCase();
+    const wantTarget = targetCurrency.trim().toUpperCase();
+    if (
+      row.sourceCurrency.trim().toUpperCase() !== wantSource ||
+      row.targetCurrency.trim().toUpperCase() !== wantTarget
+    ) {
+      return null;
+    }
+  }
+
+  return toSnapshot(row);
 }
 
 /**
@@ -82,7 +123,10 @@ export async function approvedConversion(receiptId: string): Promise<ConversionS
  * Gmail scan, the merchant API — without any of them having to know
  * whether another one got there first.
  */
-export async function captureConversion(receiptId: string): Promise<ConversionState> {
+export async function captureConversion(
+  receiptId: string,
+  context?: ConversionAuditContext,
+): Promise<ConversionState> {
   const receipt = await prisma.receipt.findUnique({
     where: { id: receiptId },
     include: { owner: true },
@@ -143,31 +187,47 @@ export async function captureConversion(receiptId: string): Promise<ConversionSt
     rate: resolved.rate,
   });
 
-  const created = await prisma.receiptConversion.create({
-    data: {
-      receiptId,
-      version: 1,
-      approved: true,
-      sourceCurrency: converted.sourceCurrency,
-      targetCurrency: converted.targetCurrency,
-      sourceScale: converted.sourceScale,
-      targetScale: converted.targetScale,
-      currencyMetadataVersion: converted.currencyMetadataVersion,
-      rate: converted.rate,
-      rateSource: resolved.source,
-      rateEffectiveDate: resolved.effectiveDate,
-      // Both policies travel: one says how the rate was *chosen*, the
-      // other how the arithmetic was *done*, and a later change to either
-      // must be attributable to the right one.
-      ratePolicyVersion: `${resolved.sourcePolicyVersion}+${RESOLVER_POLICY_VERSION}`,
-      conversionPolicyVersion: converted.conversionPolicyVersion,
-      unroundedResult: converted.unroundedResult,
-      totalTargetMinor: converted.targetMinor,
-      fxRateId: resolved.fxRateId,
-    },
-  });
+  try {
+    const created = await prisma.receiptConversion.create({
+      data: {
+        receiptId,
+        version: 1,
+        approved: true,
+        sourceCurrency: converted.sourceCurrency,
+        targetCurrency: converted.targetCurrency,
+        sourceScale: converted.sourceScale,
+        targetScale: converted.targetScale,
+        currencyMetadataVersion: converted.currencyMetadataVersion,
+        rate: converted.rate,
+        rateSource: resolved.source,
+        rateEffectiveDate: resolved.effectiveDate,
+        // Both policies travel: one says how the rate was *chosen*, the
+        // other how the arithmetic was *done*, and a later change to either
+        // must be attributable to the right one.
+        ratePolicyVersion: `${resolved.sourcePolicyVersion}+${RESOLVER_POLICY_VERSION}`,
+        conversionPolicyVersion: converted.conversionPolicyVersion,
+        unroundedResult: converted.unroundedResult,
+        totalTargetMinor: converted.targetMinor,
+        fxRateId: resolved.fxRateId,
+        operator: context?.operator,
+        reason: context?.reason,
+        correlationId: context?.correlationId,
+      },
+    });
 
-  return { status: "converted", snapshot: toSnapshot(created) };
+    return { status: "converted", snapshot: toSnapshot(created) };
+  } catch (error) {
+    if (!isUniqueConflict(error)) throw error;
+
+    // Lost the initial-capture race: another path — a second ingestion, the
+    // receipt page rendering, a reconciliation batch — inserted the one
+    // approved conversion this receipt is allowed (the partial unique index
+    // permits exactly one). Read that winner back and return it, so both
+    // callers agree on a single snapshot rather than one erroring.
+    const winner = await approvedConversion(receiptId);
+    if (winner) return { status: "converted", snapshot: winner };
+    throw error;
+  }
 }
 
 /**
@@ -250,35 +310,48 @@ export async function reprocessConversion(
     select: { version: true },
   });
 
-  const created = await prisma.$transaction(async (tx) => {
-    await tx.receiptConversion.update({ where: { id: current.id }, data: { approved: false } });
-    return tx.receiptConversion.create({
-      data: {
-        receiptId,
-        version: (highest?.version ?? current.version) + 1,
-        parentId: current.id,
-        approved: true,
-        sourceCurrency: converted.sourceCurrency,
-        targetCurrency: converted.targetCurrency,
-        sourceScale: converted.sourceScale,
-        targetScale: converted.targetScale,
-        currencyMetadataVersion: converted.currencyMetadataVersion,
-        rate: converted.rate,
-        rateSource: resolved.source,
-        rateEffectiveDate: resolved.effectiveDate,
-        ratePolicyVersion: `${resolved.sourcePolicyVersion}+${RESOLVER_POLICY_VERSION}`,
-        conversionPolicyVersion: converted.conversionPolicyVersion,
-        unroundedResult: converted.unroundedResult,
-        totalTargetMinor: converted.targetMinor,
-        fxRateId: resolved.fxRateId,
-        operator: context.operator,
-        reason: context.reason,
-        correlationId: context.correlationId,
-      },
+  try {
+    const created = await prisma.$transaction(async (tx) => {
+      await tx.receiptConversion.update({ where: { id: current.id }, data: { approved: false } });
+      return tx.receiptConversion.create({
+        data: {
+          receiptId,
+          version: (highest?.version ?? current.version) + 1,
+          parentId: current.id,
+          approved: true,
+          sourceCurrency: converted.sourceCurrency,
+          targetCurrency: converted.targetCurrency,
+          sourceScale: converted.sourceScale,
+          targetScale: converted.targetScale,
+          currencyMetadataVersion: converted.currencyMetadataVersion,
+          rate: converted.rate,
+          rateSource: resolved.source,
+          rateEffectiveDate: resolved.effectiveDate,
+          ratePolicyVersion: `${resolved.sourcePolicyVersion}+${RESOLVER_POLICY_VERSION}`,
+          conversionPolicyVersion: converted.conversionPolicyVersion,
+          unroundedResult: converted.unroundedResult,
+          totalTargetMinor: converted.targetMinor,
+          fxRateId: resolved.fxRateId,
+          operator: context.operator,
+          reason: context.reason,
+          correlationId: context.correlationId,
+        },
+      });
     });
-  });
 
-  return { status: "converted", snapshot: toSnapshot(created) };
+    return { status: "converted", snapshot: toSnapshot(created) };
+  } catch (error) {
+    if (!isUniqueConflict(error)) throw error;
+
+    // Two reprocess runs raced for the same receipt: both unapproved the
+    // same version and tried to insert a new approved one, and the partial
+    // unique index (one approved per receipt) let only the first through.
+    // The loser adopts the winner's freshly approved snapshot rather than
+    // erroring — the receipt still ends with exactly one approved version.
+    const winner = await approvedConversion(receiptId);
+    if (winner) return { status: "converted", snapshot: winner };
+    throw error;
+  }
 }
 
 export { UnknownCurrencyError };
