@@ -199,6 +199,41 @@ describe("the tax summary", () => {
     expect(summary.unconverted).toEqual([]);
   });
 
+  it("excludes an approved conversion whose target is no longer the reporting currency", async () => {
+    const owner = await registerTestUser();
+    const tag = randomUUID().slice(0, 8);
+
+    // A EUR receipt converted while the owner reported in USD.
+    await recordManualRate({
+      ownerId: owner.userId,
+      base: "EUR",
+      quote: "USD",
+      effectiveDate: new Date("2026-02-02T00:00:00.000Z"),
+      rate: "1.08",
+      actorUserId: owner.userId,
+    });
+    const foreign = await receipt(owner.userId, {
+      merchant: `Eur ${tag}`,
+      category: "OTHER",
+      totalMinor: 100,
+      purchasedAt: "2026-02-02T00:00:00.000Z",
+      currency: "EUR",
+    });
+    await captureConversion(foreign.id);
+
+    // The owner then switches their reporting currency to GBP. The stored
+    // conversion targets USD, so it must NOT be summed as though it were
+    // GBP — the receipt is named as unconverted until it is reprocessed.
+    await prisma.user.update({ where: { id: owner.userId }, data: { reportingCurrency: "GBP" } });
+
+    const summary = await taxSummary(owner.userId, 2026);
+    expect(summary.currency).toBe("GBP");
+    expect(summary.totalMinor).toBe(0);
+    expect(summary.receiptCount).toBe(0);
+    expect(summary.unconverted).toEqual([{ currency: "EUR", receiptCount: 1, totalMinor: 100 }]);
+    expect(summary.unconvertedReceiptIds).toEqual([foreign.id]);
+  });
+
   it("does not move a converted total when the rate is later corrected", async () => {
     const owner = await registerTestUser();
     const tag = randomUUID().slice(0, 8);
