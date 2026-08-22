@@ -139,7 +139,14 @@ build order, dependencies, and what needs Omar's input (provider/account
 choices) vs. what's solo-buildable right now. This bullet list is the
 *what*; RECEIPTLESS_STATE.md is the *in what order, one day at a time*.
 
-## Phase 2 — Vault maturity (Months 2–3)
+## Phase 2 — Vault maturity (Months 2–3) — **complete (2026-08-22)**
+
+> Closed by session 8 (FX reconciliation): historical receipts reconcile
+> into the owner's current reporting currency through an explicit Settings
+> flow, and the session-7 review's four defects (cold-cache holiday lookup,
+> conversion races, stale-target reporting, Apify token in the URL) are
+> fixed. Session 1's Vercel Pro / log drain stays deferred, not done, and
+> the phase closes without it. Next: **Phase 3 — Merchant API / SDK.**
 
 - ~~**First: upgrade Vercel to Pro and finish the observability
   criterion.**~~ **Deferred, and no longer first.** Session 10 required
