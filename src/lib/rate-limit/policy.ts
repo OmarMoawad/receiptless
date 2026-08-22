@@ -75,6 +75,30 @@ export const RATE_LIMIT_POLICIES = {
   /** Receipt create/upload: generous for a person, bounded for a script. */
   "receipt-write": { bucket: "receipt-write", subject: "session", limit: 120, windowSeconds: HOUR },
   /**
+   * FX reconciliation preview reads and classifies a whole vault but writes
+   * nothing and calls no provider, so it is limited like a report read: a
+   * person previews a handful of times while deciding, not thousands.
+   */
+  "fx-reconciliation-preview": {
+    bucket: "fx-reconciliation-preview",
+    subject: "session",
+    limit: 30,
+    windowSeconds: HOUR,
+  },
+  /**
+   * Apply is stricter than preview because a single batch can trigger
+   * external rate retrieval and writes conversion rows. Twelve batches an
+   * hour is enough to walk a large vault ten receipts at a time in one
+   * sitting, and low enough that a runaway client cannot hammer the
+   * provider through it.
+   */
+  "fx-reconciliation-apply": {
+    bucket: "fx-reconciliation-apply",
+    subject: "session",
+    limit: 12,
+    windowSeconds: HOUR,
+  },
+  /**
    * Claim attach reassigns ownership from a URL, so an unthrottled
    * endpoint is a token-guessing oracle as well as a write path.
    */

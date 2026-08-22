@@ -43,6 +43,21 @@ function postRequest(url: string, body: unknown, headers: Record<string, string>
   });
 }
 
+describe("the FX reconciliation policies", () => {
+  it("limits preview like a report read and apply more strictly", () => {
+    expect(RATE_LIMIT_POLICIES["fx-reconciliation-preview"]).toMatchObject({
+      subject: "session",
+      limit: 30,
+      windowSeconds: 3600,
+    });
+    expect(RATE_LIMIT_POLICIES["fx-reconciliation-apply"]).toMatchObject({
+      subject: "session",
+      limit: 12,
+      windowSeconds: 3600,
+    });
+  });
+});
+
 describe("the counter itself", () => {
   it("allows exactly `limit` requests, then refuses", async () => {
     const policy = { bucket: uniqueBucket(), subject: "ip" as const, limit: 3, windowSeconds: 60 };
