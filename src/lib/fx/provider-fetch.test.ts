@@ -105,6 +105,24 @@ describe("resolveRate reaching a provider on a miss", () => {
     expect(resolved?.effectiveDate.toISOString().slice(0, 10)).toBe("2026-03-06");
   });
 
+  it("rejects and does not persist a provider rate dated outside the window", async () => {
+    const source = `fake-${randomUUID().slice(0, 8)}`;
+    // The resolver owns the seven-day lookback; a provider that answers with
+    // a rate 30 days stale must not have it stored and silently reused.
+    const provider = new FakeProvider(source, "fake@1", {
+      rate: "0.0207",
+      effectiveDate: new Date(Date.UTC(2026, 1, 3)),
+    });
+
+    const resolved = await resolveRate(
+      { ownerId: OWNER, base: "EGP", quote: "USD", on: new Date(Date.UTC(2026, 2, 5)) },
+      provider,
+    );
+
+    expect(resolved).toBeNull();
+    expect(await prisma.fxRate.count({ where: { source } })).toBe(0);
+  });
+
   it("lets an owner's manual rate win without ever calling the provider", async () => {
     const source = `fake-${randomUUID().slice(0, 8)}`;
     const provider = new FakeProvider(source, "fake@1", {

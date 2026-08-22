@@ -205,12 +205,23 @@ export async function resolveRate(
   const cached = pick(await activeRatesFor({ ownerId: null, base, quote, from, to: on, source: provider.id }));
   if (cached) return cached;
 
-  // Nothing on file — ask the provider, and persist what it returns so the
-  // next resolve for this pair is a table read, not another fetch. This is
-  // the wiring that makes configuring a provider actually do something;
-  // without it the provider is built but never called.
-  const fetched = await provider.fetchRate(base, quote, on);
+  // Nothing on file — ask the provider for the whole lookback window in one
+  // request, and persist what it returns so the next resolve for this pair
+  // is a table read, not another fetch. This is the wiring that makes
+  // configuring a provider actually do something; without it the provider is
+  // built but never called. Passing the window rather than a single date is
+  // what lets a Sunday purchase find Friday's rate without a retry loop.
+  const fetched = await provider.fetchRate(base, quote, { from, on });
   if (!fetched) return null;
+
+  // The resolver owns the lookback, so it re-checks the provider's answer
+  // against the window it asked for before persisting: a rate dated before
+  // the floor or after the purchase date is not a rate for this window and
+  // must never enter fx_rates. A well-behaved provider already filters, but
+  // an index or an adapter can regress, and a persisted out-of-window rate
+  // would then be silently reused for every later lookup.
+  const effective = utcDay(fetched.effectiveDate).getTime();
+  if (effective < from.getTime() || effective > on.getTime()) return null;
 
   const stored = await persistProviderRate(provider, base, quote, fetched);
   return {
