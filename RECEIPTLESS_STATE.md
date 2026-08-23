@@ -10,8 +10,15 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-> **Next action: Phase 3 (Merchant API / SDK) session 1 — merchant
-> tenancy and isolation.** Vault maturity is closed. See the Desktop
+> **Next action: run the session-8 Settings browser click-through (the one
+> open Phase 2 acceptance gate), THEN Phase 3 (Merchant API / SDK) session 1
+> — merchant tenancy and isolation.** Phase 2 is *engineering complete*, but
+> its own session-8 design names a Settings reconciliation browser
+> click-through as a completion check that has not been run (and the UI has
+> no automated component test — no jsdom/testing-library harness here). Do
+> that click-through first — preview, apply, visible progress/results,
+> reload/idempotent rerun, stale-currency rejection, tax-summary outcome,
+> and a rate-unavailable case — before serious Phase 3 work. See the Desktop
 > execution plan (`README-IDent-Receiptless-Execution-Plan.md`) and its
 > `EXECUTION-LEDGER.md` for Phase 3's session sequence; the shared design
 > and per-session plans are committed in the

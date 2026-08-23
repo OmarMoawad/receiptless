@@ -139,14 +139,26 @@ build order, dependencies, and what needs Omar's input (provider/account
 choices) vs. what's solo-buildable right now. This bullet list is the
 *what*; RECEIPTLESS_STATE.md is the *in what order, one day at a time*.
 
-## Phase 2 — Vault maturity (Months 2–3) — **complete (2026-08-22)**
+## Phase 2 — Vault maturity (Months 2–3) — **engineering complete (2026-08-22); one acceptance gate open**
 
-> Closed by session 8 (FX reconciliation): historical receipts reconcile
-> into the owner's current reporting currency through an explicit Settings
-> flow, and the session-7 review's four defects (cold-cache holiday lookup,
-> conversion races, stale-target reporting, Apify token in the URL) are
-> fixed. Session 1's Vercel Pro / log drain stays deferred, not done, and
-> the phase closes without it. Next: **Phase 3 — Merchant API / SDK.**
+> Session 8 (FX reconciliation) delivered the engineering: historical
+> receipts reconcile into the owner's current reporting currency through an
+> explicit Settings flow, and the session-7 review's four defects
+> (cold-cache holiday lookup, conversion races, stale-target reporting,
+> Apify token in the URL) are fixed. Session 1's Vercel Pro / log drain
+> stays deferred, not done, and the phase closes without it.
+>
+> **One acceptance gate is still open, and named honestly here rather than
+> papered over:** the session-8 design lists a **Settings browser
+> click-through** (preview, apply, visible progress/results, reload/
+> idempotent rerun, stale-currency rejection, tax-summary outcome, and a
+> rate-unavailable case) as a completion check, and it has not been run — the
+> Settings reconciliation UI also has no automated component test (this repo
+> has no jsdom/testing-library harness). So Phase 2 is *engineering
+> complete*, with **browser acceptance pending**. That click-through is the
+> first thing to do before serious Phase 3 work. The progress badge counts
+> the engineering as done; it does not assert the browser gate has passed.
+> Next: **Phase 3 — Merchant API / SDK**, after the click-through.
 
 - ~~**First: upgrade Vercel to Pro and finish the observability
   criterion.**~~ **Deferred, and no longer first.** Session 10 required
