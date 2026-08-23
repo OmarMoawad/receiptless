@@ -188,6 +188,14 @@ choices) vs. what's solo-buildable right now. This bullet list is the
 
 ## Phase 3 — Merchant API / SDK (Months 3–5)
 
+> **Session 1 (merchant tenancy) — done 2026-08-23.** Merchant accounts,
+> the OWNER/ADMIN/DEVELOPER/VIEWER role matrix, memberships, locations, and
+> an append-only audit trail now exist as an administrative boundary around
+> a newly created canonical `Merchant`, with consumer-vault isolation
+> unchanged. This is the tenancy the authenticated merchant API (Session 2,
+> API keys) is issued *within*. See `RECEIPTLESS_STATE.md` for the full
+> record and the pending prod-migration + browser-click-through gates.
+
 - Authenticated merchant API (API keys, rate limiting, sandbox, developer
   docs) built on the claim-token protocol from Phase 0
 - First real POS pilot partner (Square, Clover, Toast, or Shopify — whichever

@@ -29,11 +29,11 @@ const PHASES = [
   // counted. It un-defers only when this charges money or a real
   // killed-invocation post-mortem needs it; the phase closes without it.
   { name: "Vault maturity", status: "done" },
-  // Phase 3 is now current at 0/8. Sessions 1–7 are buildable; session 8
-  // (the live Square merchant pilot) is externally blocked on a real
-  // merchant account and its credentials, so the phase does not close on
-  // session 7 — hence a denominator of 8, not 7.
-  { name: "Merchant API / SDK", status: "current", sessionsDone: 0, sessionsTotal: 8 },
+  // Phase 3 is current at 1/8 after Session 1 (merchant tenancy). Sessions
+  // 1–7 are buildable; session 8 (the live Square merchant pilot) is
+  // externally blocked on a real merchant account and its credentials, so
+  // the phase does not close on session 7 — hence a denominator of 8, not 7.
+  { name: "Merchant API / SDK", status: "current", sessionsDone: 1, sessionsTotal: 8 },
   { name: "Merchant terminals & payment integration", status: "pending" },
   { name: "Native apps + platform NFC", status: "pending" },
   { name: "Financial intelligence", status: "pending" },

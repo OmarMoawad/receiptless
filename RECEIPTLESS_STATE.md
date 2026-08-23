@@ -10,19 +10,50 @@ continue the currently approved roadmap"* — and if that doesn't work
 without someone supplying context from memory first, this file is out of
 date. That's a bug in this file, not a documentation nicety.
 
-> **Next action: run the session-8 Settings browser click-through (the one
-> open Phase 2 acceptance gate), THEN Phase 3 (Merchant API / SDK) session 1
-> — merchant tenancy and isolation.** Phase 2 is *engineering complete*, but
-> its own session-8 design names a Settings reconciliation browser
-> click-through as a completion check that has not been run (and the UI has
-> no automated component test — no jsdom/testing-library harness here). Do
-> that click-through first — preview, apply, visible progress/results,
-> reload/idempotent rerun, stale-currency rejection, tax-summary outcome,
-> and a rate-unavailable case — before serious Phase 3 work. See the Desktop
-> execution plan (`README-IDent-Receiptless-Execution-Plan.md`) and its
-> `EXECUTION-LEDGER.md` for Phase 3's session sequence; the shared design
-> and per-session plans are committed in the
-> `.worktrees/phase-3-merchant-platform-spec` worktree.
+> **Phase 3 (Merchant API / SDK) Session 1 — merchant tenancy — is done,
+> 2026-08-23 (badge now 1/8, 35%).** Merchants gain an administrative tenancy
+> that leaves consumer-vault isolation untouched:
+>
+> - **Schema (additive migration `20260823220000_add_merchant_tenancy`):**
+>   `MerchantAccount` (one per newly created canonical `Merchant`, `merchantId`
+>   unique), `MerchantMembership` (`@@unique([accountId, userId])` — one role
+>   per member), `MerchantLocation` (`@@unique([accountId, externalId])`), and
+>   an append-only `MerchantAuditEvent` protected by a database trigger that
+>   rejects UPDATE/DELETE. Enum `MerchantRole = OWNER|ADMIN|DEVELOPER|VIEWER`.
+>   Additive-only; `check:migrations` passes. **This touches
+>   `prisma/migrations/`, so it is not fully done until `migrate deploy` has
+>   run against prod and `/api/health` reads `schema: ok` — a manual release
+>   step that needs Omar (production `DATABASE_URL`).**
+> - **Service (`src/lib/merchant/`):** `createMerchantAccount` (transactional
+>   Merchant+Account+OWNER membership+audit; never claims a pre-existing
+>   Merchant by name; taken name → user-safe 409), `listMerchantAccounts`,
+>   `add/change/removeMerchantMember` (last-owner protection),
+>   `create/update/listMerchantLocation(s)`. One authorization gate
+>   (`requireMerchantCapability`) drives a data-defined role→capability matrix;
+>   a non-member is 404, an under-privileged member is 403.
+> - **Routes + UI:** authenticated `/api/merchant/accounts`,
+>   `/accounts/[accountId]/members`, `/accounts/[accountId]/locations` (rate
+>   limited via new `merchant-admin` policy; bodies never carry the acting
+>   user), and a `/merchant` dashboard whose mutation controls are role-gated
+>   as a convenience while the server stays the authority.
+> - **Tests:** 29 new tests (schema, service lifecycle/isolation/last-owner,
+>   append-only trigger, route 401/403/404/409, role→controls view-model).
+>   Full suite 509 passing; typecheck/lint/build/`check:migrations` all clean.
+> - **Not verified this session (needs Omar):** the `/merchant` dashboard has
+>   no automated DOM test — this repo still has no jsdom/testing-library
+>   harness, matching its existing convention, so the interactive create-
+>   account/add-location/role-hiding flow is covered by the pure view-model
+>   test plus a pending **browser click-through** (create an account, add a
+>   location, confirm a second user 404s it, confirm a VIEWER cannot mutate).
+>
+> **Next action: apply the merchant-tenancy migration to prod (needs Omar),
+> run the Session 1 browser click-through, THEN Phase 3 Session 2 — merchant
+> API keys** (plan committed at
+> `docs/superpowers/plans/2026-08-21-phase-3-session-2-api-keys.md`). The
+> older Phase 2 session-8 Settings reconciliation click-through also remains
+> an open acceptance gate. See the Desktop execution plan
+> (`README-IDent-Receiptless-Execution-Plan.md`) and its `EXECUTION-LEDGER.md`
+> for Phase 3's full session sequence.
 >
 > **Session 8 (FX reconciliation) is done, 2026-08-22, and closes Phase 2
 > (Vault maturity).** It fixed the four defects the session-7 review
