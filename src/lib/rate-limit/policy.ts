@@ -116,6 +116,14 @@ export const RATE_LIMIT_POLICIES = {
    */
   "inbound-email": { bucket: "inbound-email", subject: "ip", limit: 300, windowSeconds: MINUTE },
   /**
+   * Phase 3 Session 1: authenticated merchant-dashboard writes (create an
+   * account, add/remove members, create/update locations). Session-scoped
+   * because the work is bounded to one account owner, and generous enough
+   * for real onboarding while stopping a script from spraying accounts or
+   * membership churn.
+   */
+  "merchant-admin": { bucket: "merchant-admin", subject: "session", limit: 120, windowSeconds: MINUTE },
+  /**
    * The catch-all for authenticated writes with no reason to be tighter
    * (starting or disconnecting a provider connection today). It exists so
    * that "which limit does this route get?" always has an answer, and a

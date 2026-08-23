@@ -191,3 +191,34 @@ export const applyFxReconciliationInputSchema = z.object({
 });
 
 export type ApplyFxReconciliationRequest = z.infer<typeof applyFxReconciliationInputSchema>;
+
+/**
+ * Phase 3 Session 1: merchant tenancy.
+ *
+ * Every field a merchant-admin request may carry is bounded and typed. The
+ * acting user is never in a body — routes take it from the session — so a
+ * request cannot name a different actor, and roles are the exact enum so an
+ * unknown value is a 400, not a silent default. Names, websites, and
+ * location fields are length-bounded to keep a single request from writing
+ * an unbounded string into the tenancy tables.
+ */
+export const MERCHANT_ROLES = ["OWNER", "ADMIN", "DEVELOPER", "VIEWER"] as const;
+export const merchantRoleSchema = z.enum(MERCHANT_ROLES);
+
+export const createMerchantAccountInputSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  website: z.url().max(2000).optional(),
+});
+export type CreateMerchantAccountRequest = z.infer<typeof createMerchantAccountInputSchema>;
+
+export const addMerchantMemberInputSchema = z.object({
+  userId: z.string().trim().min(1).max(64),
+  role: merchantRoleSchema,
+});
+export type AddMerchantMemberRequest = z.infer<typeof addMerchantMemberInputSchema>;
+
+export const merchantLocationInputSchema = z.object({
+  externalId: z.string().trim().min(1).max(120),
+  displayName: z.string().trim().min(1).max(120),
+});
+export type MerchantLocationRequest = z.infer<typeof merchantLocationInputSchema>;
