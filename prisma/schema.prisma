@@ -67,6 +67,13 @@ model User {
   // at all.
   reportingCurrency String   @default("USD")
   fxRates           FxRate[]
+
+  // Phase 3 Session 1: a User becomes a merchant-side actor purely through
+  // memberships — no second account type, no second password. These are the
+  // reverse sides of the merchant-tenancy relations; they add no columns to
+  // User, so the migration that introduces them stays additive.
+  merchantMemberships MerchantMembership[]
+  merchantAuditEvents MerchantAuditEvent[]
 }
 
 model InboundEmailAddress {
@@ -101,6 +108,90 @@ model Merchant {
   website   String?
   createdAt DateTime  @default(now())
   receipts  Receipt[]
+
+  // Phase 3 Session 1: at most one merchant *account* (the administrative
+  // tenancy boundary) claims a given canonical Merchant. Optional because
+  // the vast majority of Merchant rows are ones consumers imported and no
+  // one has claimed.
+  account   MerchantAccount?
+}
+
+// --- Phase 3 Session 1: Merchant tenancy (ROADMAP.md Phase 3) ------------
+//
+// A merchant account is a thin administrative boundary around one *newly
+// created* canonical Merchant. Existing imported Merchant rows cannot be
+// claimed by name — a business proving it owns "Starbucks" is a later,
+// verified onboarding concern, not a race to POST the name first. Existing
+// User authentication is reused; a person acts on a merchant only through a
+// membership, and every capability is decided by that membership's role.
+
+enum MerchantRole {
+  OWNER
+  ADMIN
+  DEVELOPER
+  VIEWER
+}
+
+model MerchantAccount {
+  id         String   @id @default(cuid())
+  merchantId String   @unique
+  merchant   Merchant @relation(fields: [merchantId], references: [id])
+  createdAt  DateTime @default(now())
+
+  memberships MerchantMembership[]
+  locations   MerchantLocation[]
+  auditEvents MerchantAuditEvent[]
+}
+
+model MerchantMembership {
+  id        String       @id @default(cuid())
+  accountId String
+  account   MerchantAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      MerchantRole
+  createdAt DateTime     @default(now())
+
+  // One membership per (account, user): a person holds exactly one role in
+  // an account, changed in place rather than accumulated.
+  @@unique([accountId, userId])
+  @@index([userId])
+}
+
+model MerchantLocation {
+  id          String   @id @default(cuid())
+  accountId   String
+  account     MerchantAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  // The merchant's own identifier for this location (store number, POS
+  // terminal group). Unique within the account so a later POS ingestion can
+  // map an incoming location to exactly one row.
+  externalId  String
+  displayName String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([accountId, externalId])
+  @@index([accountId])
+}
+
+// Append-only. The service writes one row per privileged action; database
+// triggers reject UPDATE and DELETE so the trail cannot be rewritten from
+// the application at all, matching the "append-only audit" discipline the
+// consumer side already applies elsewhere.
+model MerchantAuditEvent {
+  id          String   @id @default(cuid())
+  accountId   String
+  account     MerchantAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  type        String
+  // The user who performed the action, when there was one. Nullable and
+  // SetNull so deleting a user never deletes their history — the row stays,
+  // the actor pointer clears.
+  actorUserId String?
+  actor       User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([accountId, createdAt])
 }
 
 model Receipt {
